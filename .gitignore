@@ -1,0 +1,30 @@
+# Python 环境 - 绝对不能上传！
+.conda/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 调试截图（太大，且不是代码）
+ops/before_click_*.png
+ops/after_click_*.png
+ops/cropped_*.png
+screenshot.png
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 临时文件
+temp_screenshot.png
+*.tmp
