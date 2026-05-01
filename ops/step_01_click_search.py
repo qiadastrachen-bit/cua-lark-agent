@@ -1,168 +1,88 @@
+import cv2
+import numpy as np
 import pyautogui
-import base64
-import os
-import requests
-import json
-import re
 import time
-import io
+import os
 from datetime import datetime
-from PIL import Image
 
-# 全局配置
-API_KEY = "ark-f11e281e-ef25-4cb0-a1ee-c7d14e8d76d4-7419d"
-ENDPOINT_ID = "ep-20260423222711-8zfcd"
-API_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
-SAVE_DIR = "D:\\feishu-cua-challenge\\ops"
+# ===== 配置 =====
+TEMPLATE_PATH = "D:\\feishu-cua-challenge\\assets\\template_search_box.png"
+SCREENSHOT_DIR = "D:\\feishu-cua-challenge\\screenshots"
 
-# 设置操作间隔防止太快
-pyautogui.PAUSE = 1
-
-def activate_feishu_window():
-    """激活飞书窗口到前台，支持匹配"飞书"或"Lark"标题"""
-    # 尝试匹配飞书窗口
-    windows = pyautogui.getWindowsWithTitle("飞书")
-    if not windows:
-        windows = pyautogui.getWindowsWithTitle("Lark")
+# ===== OpenCV 模板匹配（主手段，不调API）=====
+def opencv_match(screenshot_path, template_path, threshold=0.5, max_y_ratio=0.25):
+    screenshot = cv2.imread(screenshot_path)
+    template = cv2.imread(template_path)
     
-    if not windows:
-        raise Exception("未找到飞书/Lark窗口，请先打开飞书")
+    result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
     
-    feishu_window = windows[0]
-    if feishu_window.isMinimized:
-        feishu_window.restore()
-    feishu_window.activate()
-    time.sleep(2)  # 等待窗口激活完成
-    return feishu_window
-
-def save_screenshot(prefix):
-    """保存截图到ops目录，带时间戳"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{prefix}_{timestamp}.png"
-    save_path = os.path.join(SAVE_DIR, filename)
-    screenshot = pyautogui.screenshot()
-    screenshot.save(save_path)
-    return save_path, filename
-
-def analyze_search_box_position(img_base64):
-    """调用豆包API分析搜索框坐标，返回JSON格式结果"""
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {API_KEY}"
-    }
+    h, w = template.shape[:2]
+    center_x = max_loc[0] + w // 2
+    center_y = max_loc[1] + h // 2
+    screen_h = screenshot.shape[0]
     
-    prompt = """这是飞书桌面端 IM 界面左上角的截图。
-
-请找到"搜索"输入框，它的视觉特征是：
-- 灰色背景的长条形状
-- 左侧有放大镜图标
-- 中间有文字"搜索 (Ctrl + K)"
-- 位于界面最顶部，头像下方
-
-注意：不要把右下角的"知识问答"彩色图标当成搜索框。搜索框是横向的长条输入框。
-
-返回这个搜索框的中心坐标（相对于这张裁剪图片的坐标），格式为 JSON：{"x": 数字, "y": 数字}
-只返回 JSON，不要其他内容。"""
+    print(f"  OpenCV 最佳匹配度: {max_val:.3f}")
     
-    payload = {
-        "model": ENDPOINT_ID,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
-                ]
-            }
-        ]
-    }
-    
-    response = requests.post(API_URL, headers=headers, json=payload)
-    response.raise_for_status()
-    return response.json()["choices"][0]["message"]["content"]
+    if max_val >= threshold and center_y < screen_h * max_y_ratio:
+        return center_x, center_y, max_val
+    return None
 
-def parse_coordinates(response_text):
-    """解析模型返回的坐标，容错处理非标准JSON"""
-    # 先尝试直接解析
-    try:
-        return json.loads(response_text)
-    except json.JSONDecodeError:
-        # 尝试提取JSON部分
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group())
-            except:
-                pass
-        # 尝试提取数字
-        num_match = re.findall(r'\d+', response_text)
-        if len(num_match) >= 2:
-            return {"x": int(num_match[0]), "y": int(num_match[1])}
-    raise Exception(f"无法解析坐标信息，模型返回内容：{response_text}")
-
-
-
+# ===== 主流程 =====
 def main():
+    # 1. 检查模板文件
+    if not os.path.exists(TEMPLATE_PATH):
+        print(f"错误：找不到模板文件 {TEMPLATE_PATH}")
+        print("请先截取搜索框图片保存为 assets/template_search_box.png")
+        return
+    
+    # 2. 激活飞书窗口
+    print("步骤1: 激活飞书窗口...")
     try:
-        print("步骤1：激活飞书窗口...")
-        activate_feishu_window()
-        print("飞书窗口已激活")
-        
-        print("\n步骤2：截取操作前截图...")
-        before_screenshot, before_filename = save_screenshot("before_click")
-        print(f"操作前截图已保存：{before_filename}")
-        
-        # 裁剪左上角区域(0,0)到(400,600)提高识别精度
-        full_img = Image.open(before_screenshot)
-        crop_area = (0, 0, 400, 600)  # 左, 上, 右, 下
-        cropped_img = full_img.crop(crop_area)
-        # 保存裁剪后的截图用于调试
-        cropped_filename = before_filename.replace("before_click", "cropped")
-        cropped_path = os.path.join(SAVE_DIR, cropped_filename)
-        cropped_img.save(cropped_path)
-        print(f"裁剪后的区域截图已保存：{cropped_filename}")
-        
-        # 将裁剪后的图片转换为base64
-        buffer = io.BytesIO()
-        cropped_img.save(buffer, format="PNG")
-        img_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-        
-        print("\n步骤3：调用AI分析搜索框坐标...")
-        ai_response = analyze_search_box_position(img_base64)
-        print(f"模型返回结果：{ai_response}")
-        
-        print("\n步骤4：解析坐标信息...")
-        coordinates = parse_coordinates(ai_response)
-        # 加上裁剪偏移量换算回全屏坐标（裁剪起始位置为左上角(0,0)）
-        offset_x = 0
-        offset_y = 0
-        x = coordinates["x"] + offset_x
-        y = coordinates["y"] + offset_y
-        print(f"裁剪图坐标：x={coordinates['x']}, y={coordinates['y']}")
-        print(f"换算后全屏坐标：x={x}, y={y}")
-        
-        print("\n步骤5：点击搜索框...")
-        print(f"即将点击坐标: ({x}, {y})")
-        # 慢速移动鼠标到目标位置，1秒完成移动
-        pyautogui.moveTo(x, y, duration=1)
-        # 移动完成后等待2秒
-        time.sleep(2)
-        # 执行点击
-        pyautogui.click(x, y)
-        # 点击后等待2秒再截图
-        time.sleep(2)
-        
-        print("\n步骤6：截取操作后截图...")
-        after_screenshot, after_filename = save_screenshot("after_click")
-        print(f"操作后截图已保存：{after_filename}")
-        
-        print("\n步骤7：点击完成，请手动确认搜索框是否被激活")
-        
-        return True
-        
+        import pygetwindow as gw
+        wins = gw.getWindowsWithTitle("飞书") or gw.getWindowsWithTitle("Lark")
+        if wins:
+            win = wins[0]
+            if win.isMinimized:
+                win.restore()
+            win.activate()
+            time.sleep(1)
+            print("  飞书窗口已激活")
     except Exception as e:
-        print(f"[操作失败] {str(e)}")
+        print(f"  窗口激活失败: {e}，继续执行")
+    
+    # 3. 截取全屏
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+    before_path = os.path.join(SCREENSHOT_DIR, f"before_{timestamp}.png")
+    pyautogui.screenshot(before_path)
+    print(f"步骤2: 已保存截图")
+    
+    # 4. OpenCV 模板匹配（主手段，不调API）
+    print("步骤3: OpenCV 模板匹配...")
+    match = opencv_match(before_path, TEMPLATE_PATH)
+    
+    if match:
+        x, y, conf = match
+        print(f"  ✓ 匹配成功! 坐标: ({x}, {y}), 置信度: {conf:.3f}")
+    else:
+        print("  ✗ OpenCV 匹配失败，程序退出")
+        print("  提示：检查模板图是否正确，或尝试调低阈值")
         return False
+    
+    # 5. 点击
+    print(f"步骤4: 移动到 ({x}, {y}) 并点击...")
+    pyautogui.moveTo(x, y, duration=1)
+    time.sleep(1)
+    pyautogui.click()
+    time.sleep(2)
+    
+    # 6. 截取操作后截图
+    after_path = os.path.join(SCREENSHOT_DIR, f"after_{timestamp}.png")
+    pyautogui.screenshot(after_path)
+    print(f"步骤5: 已保存操作后截图")
+    print("✓ 完成! 请确认搜索框是否被激活")
+    return True
 
 if __name__ == "__main__":
     main()
