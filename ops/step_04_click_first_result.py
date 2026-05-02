@@ -55,10 +55,8 @@ def build_locate_prompt(screen_w, screen_h):
     """动态生成定位Prompt，传入真实屏幕分辨率，提升VLM识别准确率"""
     min_x = int(screen_w * 0.25)
     max_x = int(screen_w * 0.75)
-    # 根据屏幕高度动态计算标签栏和结果区域的y范围
-    # 标签栏通常占顶部 ~12% 区域，结果列表从 ~18% 开始
-    tab_bar_max_y = int(screen_h * 0.13)   # 标签栏下边界（约208px@1600h）
-    result_min_y = int(screen_h * 0.17)      # 第一条结果的最小y（约272px@1600h）
+    tab_bar_max_y = int(screen_h * 0.13)
+    result_min_y = int(screen_h * 0.17)
     return f"""你是一个飞书界面分析专家。请分析这张飞书搜索结果截图。
 
 **绝对规则（必须严格遵守）**：
@@ -75,6 +73,22 @@ def build_locate_prompt(screen_w, screen_h):
 
 返回格式严格为：x=数字,y=数字（例如 x=700,y=280）
 只返回坐标，不要返回其他任何内容。"""
+
+
+ANALYSIS_PROMPT = """你是一个飞书界面分析专家。请仔细分析这张飞书搜索结果截图。
+
+请按以下顺序分析，并输出你的分析过程：
+
+1. 屏幕分辨率是多少？截图尺寸是多少？
+2. 中间白色搜索面板在哪里？x范围是多少？y范围是多少？
+3. 标签栏（"消息|云文档|应用|联系人"）在哪里？y坐标范围是多少？
+4. 搜索结果列表从哪里开始（标签栏下方第一条）？第一条结果的坐标大概是多少？
+5. 第一条结果的特征：名称是什么？有没有图标？
+
+请先输出分析过程，最后给出第一条可点击搜索结果的坐标。
+格式：
+分析：...
+坐标：x=数字,y=数字"""
 
 
 LOCATE_PROMPT = build_locate_prompt(2560, 1600)  # 默认值，运行时会被替换
@@ -123,14 +137,15 @@ VERIFY_PROMPT = """你是一个飞书界面分析专家。请对比这两张截�
 如果失败：FAIL + 一句话说明"""
 
 MAX_VLM_RETRIES = 3
-VLM_RETRY_DELAY = 5
+VLM_RETRY_BASE_DELAY = 10   # 指数退避基础间隔（秒）
+VLM_TIMEOUT = 60             # API 调用超时（秒）
 
 # 坐标合理性边界
 MARGIN = 50  # 屏幕边缘安全距离
 
 
-def call_vlm(image_path, prompt, max_retries=MAX_VLM_RETRIES):
-    """调用 VLM 分析截图，返回原始文本"""
+def call_vlm(image_path, prompt, max_retries=MAX_VLM_RETRIES, timeout=VLM_TIMEOUT):
+    """调用 VLM 分析截图，返回原始文本（含指数退避）"""
     with open(image_path, "rb") as f:
         img_base64 = base64.b64encode(f.read()).decode("utf-8")
 
@@ -154,27 +169,35 @@ def call_vlm(image_path, prompt, max_retries=MAX_VLM_RETRIES):
 
     for attempt in range(1, max_retries + 1):
         try:
-            print(f"  🤖 VLM 调用中... (第 {attempt} 次)")
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
+            print(f"  🤖 VLM 调用中... (第 {attempt} 次, timeout={timeout}s)")
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=timeout)
             response.raise_for_status()
             result = response.json()
             content = result["choices"][0]["message"]["content"]
-            print(f"  📝 VLM 返回: {content.strip()[:100]}")
+            print(f"  📝 VLM 返回: {content.strip()[:120]}")
             return content.strip()
+        except requests.exceptions.Timeout:
+            wait = VLM_RETRY_BASE_DELAY * (2 ** (attempt - 1))  # 10, 20, 40
+            print(f"  ⚠️ VLM 超时 (>{timeout}s)，等待 {wait}s 后重试...")
+            if attempt < max_retries:
+                time.sleep(wait)
         except requests.exceptions.HTTPError as e:
             if response.status_code == 429:
-                wait = VLM_RETRY_DELAY * attempt
-                print(f"  ⚠️ TPM 限流 (429)，等待 {wait} 秒后重试...")
-                time.sleep(wait)
+                wait = VLM_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                print(f"  ⚠️ TPM 限流 (429)，等待 {wait}s 后重试...")
+                if attempt < max_retries:
+                    time.sleep(wait)
             else:
                 print(f"  ❌ HTTP 错误: {e}")
                 if attempt < max_retries:
-                    time.sleep(VLM_RETRY_DELAY)
+                    time.sleep(VLM_RETRY_BASE_DELAY)
         except Exception as e:
-            print(f"  ❌ 调用失败: {e}")
+            wait = VLM_RETRY_BASE_DELAY * attempt
+            print(f"  ❌ 调用失败: {e}，{wait}s 后重试...")
             if attempt < max_retries:
-                time.sleep(VLM_RETRY_DELAY)
+                time.sleep(wait)
 
+    print("  ❌ VLM 所有重试均失败")
     return None
 
 
@@ -277,36 +300,49 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
     except Exception as e:
         print(f"⚠️  窗口激活失败: {str(e)}")
 
-    # ====== 第一步：VLM 定位（带3次重试，每次重新截图） ======
+    # ====== 第一步：VLM 两步式定位（分析→定位，带重试）======
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     screen_w, screen_h = pyautogui.size()
     locate_prompt = build_locate_prompt(screen_w, screen_h)
     coords = None
     MAX_LOCATE_RETRIES = 3
-    marked_path = None  # 初始化，用于后续清理
+    marked_path = None
 
     for locate_attempt in range(1, MAX_LOCATE_RETRIES + 1):
         print(f"\n🔍 [阶段1] VLM 定位搜索结果 (尝试 {locate_attempt}/{MAX_LOCATE_RETRIES})...")
         before_path = os.path.join(SCREENSHOT_DIR, f"step04_before_{timestamp}_attempt{locate_attempt}.png")
         pyautogui.screenshot(before_path)
         print(f"📸 [阶段1] 操作前截图已保存: {before_path}")
-        
-        vlm_output = call_vlm(before_path, locate_prompt)
-        if not vlm_output:
-            print(f"  ❌ 第 {locate_attempt} 次VLM调用失败，重试...")
-            time.sleep(1)
+
+        # ====== 两步式 VLM 调用（参考 TuriX-CUA See→Think→Act）=====
+        # 第1步：让 VLM 分析界面结构（See+Think）
+        print("  🧠 第1步：VLM 分析界面结构...")
+        analysis = call_vlm(before_path, ANALYSIS_PROMPT, timeout=90)
+        if analysis:
+            print(f"  📝 分析结果: {analysis[:150]}")
+        else:
+            print(f"  ❌ 第 {locate_attempt} 次分析失败，重试...")
+            time.sleep(2)
             continue
-        
+
+        # 第2步：基于分析结果，让 VLM 给出精确坐标（Act）
+        print("  🎯 第2步：VLM 给出精确坐标...")
+        vlm_output = call_vlm(before_path, locate_prompt, timeout=60)
+        if not vlm_output:
+            print(f"  ❌ 第 {locate_attempt} 次坐标获取失败，重试...")
+            time.sleep(2)
+            continue
+
         current_coords = parse_vlm_coordinates(vlm_output)
         if not current_coords:
             print(f"  ❌ 第 {locate_attempt} 次坐标解析失败: {vlm_output}，重试...")
-            time.sleep(1)
+            time.sleep(2)
             continue
-        
+
         x, y = current_coords
         print(f"  🎯 VLM 返回坐标: ({x}, {y})")
-        
+
         # 基本坐标校验
         if validate_coordinates(x, y):
             coords = current_coords
@@ -314,10 +350,26 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
             break
         else:
             print(f"  ❌ 坐标未通过校验，重试...")
-            time.sleep(1)
+            time.sleep(2)
+
+    # OpenCV 兜底：VLM 全部失败时用模板匹配
+    if not coords:
+        print("\n⚠️ VLM 定位全部失败，启用 OpenCV 模板匹配兜底...")
+        template_path = "D:\\feishu-cua-challenge\\assets\\template_first_result.png"
+        if os.path.exists(template_path):
+            match = opencv_match_template(before_path, template_path)
+            if match:
+                x, y, conf = match
+                print(f"  ✅ OpenCV 兜底成功! 坐标: ({x}, {y}), 置信度: {conf:.3f}")
+                coords = (x, y)
+            else:
+                print("  ❌ OpenCV 模板匹配也失败")
+        else:
+            print(f"  ⚠️ 模板图不存在: {template_path}，跳过 OpenCV 兜底")
+            print("  💡 提示：截取一条搜索结果保存为 assets/template_first_result.png")
 
     if not coords:
-        print("❌ 多次定位失败，终止操作")
+        print("❌ 所有定位方式均失败，终止操作")
         if visualizer:
             visualizer.stop()
         return False
@@ -447,6 +499,25 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
 
     print("\n✅ Step 04 完成全流程：定位→确认→点击→验证")
     return True
+
+
+def opencv_match_template(screenshot_path, template_path, threshold=0.7, max_y_ratio=0.6):
+    """OpenCV 模板匹配兜底（用于 VLM 全部失败时）"""
+    screenshot = cv2.imread(screenshot_path)
+    template = cv2.imread(template_path)
+    if screenshot is None or template is None:
+        print("  ❌ OpenCV: 截图或模板图读取失败")
+        return None
+    result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
+    h, w = template.shape[:2]
+    center_x = max_loc[0] + w // 2
+    center_y = max_loc[1] + h // 2
+    screen_h = screenshot.shape[0]
+    print(f"  🔍 OpenCV 模板匹配置信度: {max_val:.3f}")
+    if max_val >= threshold and center_y < screen_h * max_y_ratio:
+        return center_x, center_y, max_val
+    return None
 
 
 if __name__ == "__main__":
