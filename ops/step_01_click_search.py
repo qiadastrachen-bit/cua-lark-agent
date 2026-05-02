@@ -72,6 +72,7 @@ def main():
     
     # 5. 点击
     print(f"步骤4: 移动到 ({x}, {y}) 并点击...")
+    pyautogui.FAILSAFE = False  # 禁用 fail-safe（比赛场景下有 VLM 确认保障安全）
     pyautogui.moveTo(x, y, duration=1)
     time.sleep(1)
     pyautogui.click()

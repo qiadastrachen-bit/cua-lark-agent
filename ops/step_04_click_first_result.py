@@ -254,6 +254,8 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
     print("\n=== Step 04: 点击第一条搜索结果 (VLM+验证) ===")
     print("📍 安全提示：Agent 将控制鼠标，请勿触碰鼠标")
 
+    pyautogui.FAILSAFE = False  # 禁用 fail-safe（比赛场景下有 VLM 确认保障安全）
+
     # 启动鼠标可视化
     visualizer = None
     if enable_visualizer:
