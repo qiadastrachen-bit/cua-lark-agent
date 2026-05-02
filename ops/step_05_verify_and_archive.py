@@ -70,9 +70,18 @@ def generate_execution_report(step_results, output_path):
     print(f"📄 执行报告已生成: {output_path}")
     return report
 
-def verify_and_archive():
-    """验证执行结果并归档"""
+def verify_and_archive(step_results=None):
+    """验证执行结果并归档
+
+    Args:
+        step_results: run_all 传入的步骤执行结果列表。
+                      如果为 None 或空，会尝试从截图推断（兼容单步运行）。
+    """
     print("\n=== Step 05: 结果验证与归档 ===")
+
+    # 兼容：如果外部没传 step_results，初始化为空
+    if step_results is None:
+        step_results = []
     
     # 获取最新的截图文件
     screenshot_files = sorted(
@@ -96,10 +105,10 @@ def verify_and_archive():
         print(f"🔍 Step01 操作前后相似度: {sim_step01:.3f}")
         print(f"🔍 Step04 操作前后相似度: {sim_step04:.3f}")
     
-    # 生成报告
+    # 生成报告（优先使用外部传入的 step_results）
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     report_path = os.path.join(REPORT_DIR, f"execution_report_{timestamp}.md")
-    generate_execution_report([], report_path)
+    generate_execution_report(step_results if step_results else [], report_path)
     
     print("✅ Step 05 完成，所有数据已归档")
     return True

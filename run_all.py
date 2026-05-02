@@ -91,7 +91,7 @@ def main():
     print("\n" + "="*40)
     print("执行 Step 05: 结果验证与归档")
     print("="*40)
-    success = step05()
+    success = step05(step_results=step_results)
     step_results.append({
         "name": "结果验证与归档",
         "success": success,
