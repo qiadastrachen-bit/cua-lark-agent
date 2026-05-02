@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CUA Agent · Overlay</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+    background: transparent;
+    width: 340px;
+    position: fixed;
+    right: 20px;
+    top: 60px;
+    z-index: 2147483647;
+    pointer-events: auto;
+  }
+
+  #card {
+    background: rgba(255,255,255,0.82);
+    backdrop-filter: blur(18px) saturate(1.4);
+    -webkit-backdrop-filter: blur(18px) saturate(1.4);
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08);
+    border: 1px solid rgba(255,255,255,0.6);
+    overflow: hidden;
+    transition: all 0.3s ease;
+    font-size: 13px;
+    color: #1a1a2e;
+  }
+
+  #card.collapsed .body { display: none; }
+  #card.collapsed { width: 48px; height: 48px; border-radius: 50%; }
+
+  #header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    cursor: pointer;
+    user-select: none;
+  }
+  #header h1 { font-size: 14px; font-weight: 600; letter-spacing: 0.5px; }
+  #toggle-btn {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: rgba(255,255,255,0.2); border: none;
+    color: white; font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .body { padding: 0; }
+
+  /* 进度条 */
+  #progress-bar {
+    height: 4px;
+    background: #e8e8f0;
+    position: relative;
+  }
+  #progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #667eea, #764ba2);
+    border-radius: 0 2px 2px 0;
+    transition: width 0.6s ease;
+    width: 0%;
+  }
+
+  /* 当前步骤 */
+  #current-step {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid #f0f0f5;
+  }
+  #step-label {
+    font-size: 11px; color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  #step-name {
+    font-size: 15px; font-weight: 600;
+    color: #1a1a2e;
+  }
+  #phase-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    margin-top: 6px;
+  }
+  .phase-see  { background: #e8f4fd; color: #2196F3; }
+  .phase-think { background: #fff3e0; color: #FF9800; }
+  .phase-act   { background: #e8f5e9; color: #4CAF50; }
+  .phase-verify { background: #f3e5f5; color: #9C27B0; }
+  .phase-done  { background: #e8f5e9; color: #2E7D32; }
+  .phase-error { background: #ffebee; color: #C62828; }
+
+  /* VLM 思考过程 */
+  #thinking-section {
+    padding: 10px 16px;
+    border-bottom: 1px solid #f0f0f5;
+  }
+  .section-title {
+    font-size: 11px; color: #888;
+    margin-bottom: 6px;
+    display: flex; align-items: center; gap: 4px;
+  }
+  #thinking-content {
+    font-size: 12px;
+    color: #444;
+    line-height: 1.6;
+    max-height: 80px;
+    overflow-y: auto;
+    padding: 8px;
+    background: #fafafa;
+    border-radius: 8px;
+    border: 1px solid #eee;
+  }
+  #thinking-content::-webkit-scrollbar { width: 3px; }
+  #thinking-content::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+
+  /* 操作日志 */
+  #log-section { padding: 10px 16px 14px; }
+  #log-list {
+    max-height: 120px;
+    overflow-y: auto;
+    font-size: 11px;
+    color: #666;
+    line-height: 1.7;
+  }
+  #log-list::-webkit-scrollbar { width: 3px; }
+  #log-list::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+  .log-time { color: #999; margin-right: 4px; }
+
+  /* 状态图标 */
+  .spinner {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 2px solid rgba(102,126,234,0.3);
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .dot-flashing {
+    position: relative;
+    display: inline-block;
+    width: 40px; height: 14px;
+    vertical-align: middle;
+  }
+  .dot-flashing::before, .dot-flashing::after, .dot-flashing span {
+    content: '';
+    position: absolute;
+    top: 4px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #667eea;
+    animation: flasing 1.2s infinite ease;
+  }
+  .dot-flashing::before { left: 6px; animation-delay: 0s; }
+  .dot-flashing span   { left: 17px; animation-delay: 0.2s; }
+  .dot-flashing::after  { left: 28px; animation-delay: 0.4s; }
+  @keyframes flasing {
+    0%, 80%, 100% { opacity: 0.3; }
+    40% { opacity: 1; }
+  }
+
+  #status-icon { margin-right: 6px; }
+</style>
+</head>
+<body>
+
+<div id="card">
+  <div id="header" onclick="toggle()">
+    <h1>🤖 CUA Agent</h1>
+    <button id="toggle-btn">−</button>
+  </div>
+  <div class="body">
+    <div id="progress-bar"><div id="progress-fill"></div></div>
+
+    <div id="current-step">
+      <div id="step-label">当前步骤</div>
+      <div id="step-name">等待开始…</div>
+      <div id="phase-badge" class="phase-see" style="display:none;"></div>
+    </div>
+
+    <div id="thinking-section">
+      <div class="section-title">🧠 VLM 思考过程</div>
+      <div id="thinking-content">暂无</div>
+    </div>
+
+    <div id="log-section">
+      <div class="section-title">📋 操作日志</div>
+      <div id="log-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let collapsed = false;
+function toggle() {
+  collapsed = !collapsed;
+  document.getElementById('card').classList.toggle('collapsed');
+  document.getElementById('toggle-btn').textContent = collapsed ? '+' : '−';
+}
+
+const TOTAL_STEPS = 5;
+const phaseMap = {
+  'See':    { cls: 'phase-see',    text: '🔍 感知' },
+  'Think':  { cls: 'phase-think',  text: '🧠 思考' },
+  'Act':    { cls: 'phase-act',    text: '🖱️ 执行' },
+  'Verify': { cls: 'phase-verify', text: '✅ 验证' },
+  'Done':   { cls: 'phase-done',   text: '✅ 完成' },
+  'Error':  { cls: 'phase-error',  text: '❌ 错误' },
+};
+
+function updateUI() {
+  fetch('/state')
+    .then(r => r.json())
+    .then(d => {
+      // 进度条
+      const pct = Math.min(100, (d.step / TOTAL_STEPS) * 100);
+      document.getElementById('progress-fill').style.width = pct + '%';
+
+      // 当前步骤
+      document.getElementById('step-name').textContent = d.step_name || '等待开始…';
+
+      // 阶段 badge
+      const badge = document.getElementById('phase-badge');
+      const ph = d.phase || '';
+      if (ph && phaseMap[ph]) {
+        badge.style.display = 'inline-block';
+        badge.className = 'phase-' + ph.toLowerCase();
+        badge.textContent = (phaseMap[ph] || {}).text || ph;
+      } else {
+        badge.style.display = 'none';
+      }
+
+      // 思考过程
+      document.getElementById('thinking-content').textContent = d.phase_detail || '暂无';
+
+      // 日志
+      const logEl = document.getElementById('log-list');
+      if (d.log && d.log.length) {
+        logEl.innerHTML = d.log.slice(-20).map(l => {
+          // l = "[HH:MM:SS] text"
+          const m = l.match(/^\[(\d{2}:\d{2}:\d{2})\]\s*(.*)/);
+          if (m) return '<div><span class="log-time">[' + m[1] + ']</span>' + (m[2] || '') + '</div>';
+          return '<div>' + l + '</div>';
+        }).join('');
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      // 成功/失败整体样式
+      const card = document.getElementById('card');
+      card.style.borderColor = '';
+      if (d.success === true)  card.style.borderColor = '#4CAF50';
+      if (d.success === false) card.style.borderColor = '#f44336';
+    })
+    .catch(() => {});
+}
+
+updateUI();
+setInterval(updateUI, 800);
+</script>
+</body>
+</html>

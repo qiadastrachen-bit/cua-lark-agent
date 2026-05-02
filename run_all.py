@@ -1,10 +1,21 @@
 import os
 import sys
 import time
+import webbrowser
 from datetime import datetime
 
 # 添加项目根目录到路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+# 启动 Overlay UI
+print("[Overlay] 启动可视化界面...")
+try:
+    from utils.overlay_server import launch
+    overlay_thread = launch()
+    print("[Overlay] ✅ 已启动，访问 http://localhost:8088")
+except Exception as e:
+    print(f"[Overlay] ⚠️ 启动失败（不影响主流程）: {e}")
+    overlay_thread = None
 
 # 导入所有步骤
 from ops.step_01_click_search import main as step01
@@ -12,6 +23,21 @@ from ops.step_02_input_text import main as step02
 from ops.step_03_wait_search_results import wait_search_results as step03
 from ops.step_04_click_first_result import click_first_result as step04
 from ops.step_05_verify_and_archive import verify_and_archive as step05
+
+# Overlay 推送（静默失败）
+try:
+    from utils.overlay_client import push
+    _HAVE_PUSH = True
+except Exception:
+    _HAVE_PUSH = False
+    def push(*a, **kw): pass
+
+def _push(step, name, phase, detail="", success=None):
+    if _HAVE_PUSH:
+        try:
+            push(step=step, name=name, phase=phase, detail=detail, success=success)
+        except Exception:
+            pass
 
 def main():
     print("=" * 60)
@@ -22,6 +48,7 @@ def main():
     step_results = []
     
     # Step 01: 点击搜索框
+    _push(1, "点击搜索框", "See", "即将执行...")
     step_start = time.time()
     print("\n" + "="*40)
     print("执行 Step 01: 点击搜索框")
@@ -33,12 +60,16 @@ def main():
         "duration": time.time() - step_start,
         "message": "成功激活搜索框" if success else "搜索框点击失败"
     })
-    if not success:
+    if success:
+        _push(1, "点击搜索框", "Done", "搜索框已激活", success=True)
+    else:
+        _push(1, "点击搜索框", "Error", "搜索框点击失败", success=False)
         print("[失败] Step 01 失败，终止流程")
         return False
     time.sleep(0.5)
     
     # Step 02: 输入搜索文字
+    _push(2, "输入搜索文字", "See", "即将执行...")
     step_start = time.time()
     print("\n" + "="*40)
     print("执行 Step 02: 输入搜索文字")
@@ -50,12 +81,16 @@ def main():
         "duration": time.time() - step_start,
         "message": "成功输入'飞书妙搭'并搜索" if success else "文字输入失败"
     })
-    if not success:
+    if success:
+        _push(2, "输入搜索文字", "Done", "已输入'飞书妙搭'", success=True)
+    else:
+        _push(2, "输入搜索文字", "Error", "文字输入失败", success=False)
         print("[失败] Step 02 失败，终止流程")
         return False
     time.sleep(0.5)
     
     # Step 03: 等待搜索结果
+    _push(3, "等待搜索结果", "See", "即将执行...")
     step_start = time.time()
     print("\n" + "="*40)
     print("执行 Step 03: 等待搜索结果")
@@ -67,9 +102,14 @@ def main():
         "duration": time.time() - step_start,
         "message": "搜索结果加载完成"
     })
+    if success:
+        _push(3, "等待搜索结果", "Done", "搜索结果已加载", success=True)
+    else:
+        _push(3, "等待搜索结果", "Error", "搜索结果加载失败", success=False)
     time.sleep(0.5)
     
     # Step 04: 点击第一个搜索结果
+    _push(4, "点击第一个搜索结果", "See", "即将执行...")
     step_start = time.time()
     print("\n" + "="*40)
     print("执行 Step 04: 点击第一个搜索结果")
@@ -81,12 +121,16 @@ def main():
         "duration": time.time() - step_start,
         "message": "成功打开第一个搜索结果" if success else "点击搜索结果失败"
     })
-    if not success:
+    if success:
+        _push(4, "点击第一个搜索结果", "Done", "第一个搜索结果已点击", success=True)
+    else:
+        _push(4, "点击第一个搜索结果", "Error", "点击搜索结果失败", success=False)
         print("[失败] Step 04 失败，终止流程")
         return False
     time.sleep(0.5)
     
     # Step 05: 验证与归档
+    _push(5, "结果验证与归档", "See", "即将执行...")
     step_start = time.time()
     print("\n" + "="*40)
     print("执行 Step 05: 结果验证与归档")
@@ -98,6 +142,7 @@ def main():
         "duration": time.time() - step_start,
         "message": "数据归档完成"
     })
+    _push(5, "结果验证与归档", "Done", "归档完成", success=True)
     
     # 统计结果
     total_time = time.time() - start_time
