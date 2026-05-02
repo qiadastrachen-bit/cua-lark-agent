@@ -51,26 +51,33 @@ API_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
 
 # ====== VLM Prompts ======
 
-LOCATE_PROMPT = """你是一个飞书界面分析专家。请分析这张飞书搜索结果截图。
+def build_locate_prompt(screen_w, screen_h):
+    """动态生成定位Prompt，传入真实屏幕分辨率，提升VLM识别准确率"""
+    min_x = int(screen_w * 0.25)
+    max_x = int(screen_w * 0.75)
+    return f"""你是一个飞书界面分析专家。请分析这张飞书搜索结果截图。
 
-**关键区分**：
-- 左侧是【消息列表】——不要管它
-- 中间弹出的白色面板才是【搜索结果面板】——只看这个
+**绝对规则（必须严格遵守）**：
+1. ❌ 左侧区域：所有坐标x < {min_x} 的内容直接忽略，绝对不要返回！
+2. ❌ 右侧区域：所有坐标x > {max_x} 的内容直接忽略，绝对不要返回！
+⚠️  只看【中间白色悬浮的搜索结果面板】：
+✅ 这个面板的x坐标范围在 {min_x} ~ {max_x} 之间，是搜索时弹出的白色半透明背景面板
+✅ 面板内部从上到下结构：
+  1. 顶部搜索框（不要点）
+  2. 标签栏（消息 | 云文档 | 应用 | 联系人...，不要点）
+  3. 【搜索结果列表】：标签栏下方的可点击条目区域，找这里的第一条！
 
-任务：在中间的搜索结果面板中，找到**第一条可点击的搜索结果**。
-
-搜索结果面板结构（从上到下）：
-1. 搜索框（顶部）——不要点这个
-2. 标签栏：消息 | 云文档 | 应用 | 联系人 | ... ——不要点这个  
-3. 【搜索结果列表】——找这个区域的第一条！
-
-第一条结果的特征：
-- 通常是"应用"分类下的卡片（带图标和名称），如"妙搭"或"妙搭助手"
-- 或者是"消息"分类下的聊天记录条目
-- 位于标签栏下方，是面板中第一个可点击的具体结果项
+任务：只在 {min_x}~{max_x} x坐标范围内的搜索结果面板中，找到**第一条可点击的搜索结果**。
+第一条结果特征：
+- 位于标签栏正下方，y坐标 > 150px
+- 带图标和名称的卡片/条目，比如"妙搭助手"应用、第一条聊天记录等
+- 绝对不能是左侧边栏、搜索框、标签栏的内容
 
 返回格式严格为：x=数字,y=数字（例如 x=680,y=320）
 只返回坐标，不要返回其他任何内容。"""
+
+
+LOCATE_PROMPT = build_locate_prompt(2560, 1600)  # 默认值，运行时会被替换
 
 CONFIRM_PROMPT = """你是一个飞书界面分析专家。请确认这张截图中红圈标记的位置。
 
@@ -200,6 +207,13 @@ def validate_coordinates(x, y):
         print(f"  ⚠️ 坐标太靠近屏幕边缘: ({x}, {y}), 屏幕尺寸: {screen_w}x{screen_h}")
         return False
 
+    # 排除左右边栏，只保留中间50%区域（搜索结果面板所在位置）
+    min_x = int(screen_w * 0.25)
+    max_x = int(screen_w * 0.75)
+    if x < min_x or x > max_x:
+        print(f"  ⚠️ X坐标 {x} 不在中间有效区域（{min_x}~{max_x}），可能在左右边栏")
+        return False
+
     # 搜索框通常在顶部很靠上的位置（<150px），排除
     if y < 120:
         print(f"  ⚠️ Y坐标 {y} 太小，可能指向搜索框或标签栏")
@@ -260,73 +274,115 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
     except Exception as e:
         print(f"⚠️  窗口激活失败: {str(e)}")
 
-    # ====== 第一步：VLM 定位 ======
+    # ====== 第一步：VLM 定位（带3次重试，每次重新截图） ======
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-    
-    before_path = os.path.join(SCREENSHOT_DIR, f"step04_before_{timestamp}.png")
-    pyautogui.screenshot(before_path)
-    print(f"\n📸 [阶段1] 操作前截图已保存: {before_path}")
+    screen_w, screen_h = pyautogui.size()
+    locate_prompt = build_locate_prompt(screen_w, screen_h)
+    coords = None
+    MAX_LOCATE_RETRIES = 3
+    marked_path = None  # 初始化，用于后续清理
 
-    print("\n🔍 [阶段1] VLM 定位搜索结果...")
-    vlm_output = call_vlm(before_path, LOCATE_PROMPT)
+    for locate_attempt in range(1, MAX_LOCATE_RETRIES + 1):
+        print(f"\n🔍 [阶段1] VLM 定位搜索结果 (尝试 {locate_attempt}/{MAX_LOCATE_RETRIES})...")
+        before_path = os.path.join(SCREENSHOT_DIR, f"step04_before_{timestamp}_attempt{locate_attempt}.png")
+        pyautogui.screenshot(before_path)
+        print(f"📸 [阶段1] 操作前截图已保存: {before_path}")
+        
+        vlm_output = call_vlm(before_path, locate_prompt)
+        if not vlm_output:
+            print(f"  ❌ 第 {locate_attempt} 次VLM调用失败，重试...")
+            time.sleep(1)
+            continue
+        
+        current_coords = parse_vlm_coordinates(vlm_output)
+        if not current_coords:
+            print(f"  ❌ 第 {locate_attempt} 次坐标解析失败: {vlm_output}，重试...")
+            time.sleep(1)
+            continue
+        
+        x, y = current_coords
+        print(f"  🎯 VLM 返回坐标: ({x}, {y})")
+        
+        # 基本坐标校验
+        if validate_coordinates(x, y):
+            coords = current_coords
+            print(f"  ✅ 坐标校验通过")
+            break
+        else:
+            print(f"  ❌ 坐标未通过校验，重试...")
+            time.sleep(1)
 
-    if not vlm_output:
-        print("❌ VLM 定位失败")
-        if visualizer:
-            visualizer.stop()
-        return False
-
-    coords = parse_vlm_coordinates(vlm_output)
     if not coords:
-        print(f"❌ 无法解析坐标: {vlm_output}")
+        print("❌ 多次定位失败，终止操作")
         if visualizer:
             visualizer.stop()
         return False
 
     x, y = coords
-    print(f"  🎯 [阶段1] VLM 定位: ({x}, {y})")
+    print(f"  🎯 [阶段1] 最终定位: ({x}, {y})")
 
-    # 基本坐标校验
-    if not validate_coordinates(x, y):
-        print("  ❌ 坐标未通过基本校验，终止操作")
-        if visualizer:
-            visualizer.stop()
-        return False
+    # ====== 第二步：VLM 确认坐标正确性（复用同一重试循环） ======
+    for confirm_attempt in range(1, MAX_LOCATE_RETRIES + 1):
+        # 阶段 2：移动鼠标 + VLM 确认
+        print(f"\n🖱️  [阶段2] 移动鼠标到 ({x}, {y})... (确认尝试 {confirm_attempt}/{MAX_LOCATE_RETRIES})")
+        pyautogui.moveTo(x, y, duration=1.5)
+        time.sleep(0.8)
 
-    # ====== 第二步：移动鼠标 + VLM 确认 ======
-    print(f"\n🖱️  [阶段2] 移动鼠标到目标位置 ({x}, {y})...")
-    pyautogui.moveTo(x, y, duration=1.5)
-    time.sleep(0.8)
+        # 检查鼠标是否被用户移动
+        if not check_mouse_unchanged(x, y):
+            print("  ⚠️ 检测到鼠标位置被改变，可能用户正在操作")
+            x, y = pyautogui.position()
+            print(f"  🔄 使用当前位置作为新目标: ({x}, {y})")
 
-    # 检查鼠标是否被用户移动
-    if not check_mouse_unchanged(x, y):
-        print("  ⚠️  检测到鼠标位置被改变，可能用户正在操作")
-        print("  💡 请在 Agent 操作期间不要触碰鼠标。重新定位...")
-        # 重新读取当前位置作为目标
-        x, y = pyautogui.position()
-        print(f"  🔄 使用当前位置作为新目标: ({x}, {y})")
+        # 清理上一次的标记文件
+        try:
+            if marked_path and marked_path != before_path and os.path.exists(marked_path):
+                os.remove(marked_path)
+        except:
+            pass
 
-    # 在鼠标位置绘制标记图供 VLM 确认
-    marked_path = draw_crosshair_on_image(before_path, int(x), int(y))
-    print(f"  🔍 [阶段2] VLM 确认坐标正确性...")
+        marked_path = draw_crosshair_on_image(before_path, int(x), int(y))
+        print(f"  🔍 VLM 确认坐标正确性...")
 
-    confirm_result = call_vlm(marked_path, CONFIRM_PROMPT)
+        confirm_result = call_vlm(marked_path, CONFIRM_PROMPT)
 
-    if confirm_result and confirm_result.upper().startswith("OK"):
-        print("  ✅ [阶段2] VLM 确认：位置正确 ✓")
-    elif confirm_result and confirm_result.upper().startswith("NO"):
-        print(f"  ❌ [阶段2] VLM 拒绝：{confirm_result}")
-        print("  💡 建议重新运行或手动检查搜索结果布局")
-        if visualizer:
-            visualizer.stop()
-        return False
-    else:
-        print(f"  ⚠️ [阶段2] VLM 确认结果不明确: {confirm_result}")
-        print("  ⚠️ 继续执行（建议后续关注此问题）...")
+        if confirm_result and confirm_result.upper().startswith("OK"):
+            print("  ✅ VLM 确认：位置正确 ✓")
+            break  # 确认成功，跳出确认循环
+        elif confirm_result and confirm_result.upper().startswith("NO"):
+            print(f"  ❌ VLM 拒绝：{confirm_result}")
+            if confirm_attempt < MAX_LOCATE_RETRIES:
+                print(f"  🔄 重新截图并定位（剩余 {MAX_LOCATE_RETRIES - confirm_attempt} 次）...")
+                time.sleep(2)
+                # 重新进入定位流程
+                print(f"\n🔍 [阶段1] VLM 重新定位搜索结果 (尝试 {confirm_attempt+1}/{MAX_LOCATE_RETRIES})...")
+                before_path = os.path.join(SCREENSHOT_DIR, f"step04_before_{timestamp}_attempt{confirm_attempt+1}.png")
+                pyautogui.screenshot(before_path)
+                vlm_output = call_vlm(before_path, locate_prompt)
+                if vlm_output:
+                    current_coords = parse_vlm_coordinates(vlm_output)
+                    if current_coords and validate_coordinates(*current_coords):
+                        x, y = current_coords
+                        print(f"  🎯 重新定位坐标: ({x}, {y})")
+                        continue  # 用新坐标继续确认循环
+                # 重新定位也失败了
+                print("  ❌ 重新定位失败")
+            else:
+                print("❌ 所有确认尝试均被拒绝")
+                if visualizer:
+                    visualizer.stop()
+                return False
+        else:
+            print(f"  ⚠️ VLM 确认结果不明确: {confirm_result}")
+            # 不明确时继续执行（不终止），但不再重试
+            print("  ⚠️ 继续执行（建议后续关注此问题）...")
+            break
 
     # ====== 第三步：执行点击 ======
-    print(f"\n🖱️  [阶段3] 执行点击...")
+    print(f"\n{'='*40}")
+    print("🖱️  [阶段3] 执行点击...")
+    print(f"{'='*40}")
     pyautogui.click()
     time.sleep(2.5)
 
