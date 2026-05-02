@@ -97,23 +97,23 @@ CONFIRM_PROMPT = """你是一个飞书界面分析专家。请确认这张截图
 
 任务：判断红圈标记的位置是否是**搜索结果列表中的第一条可点击结果**。
 
-判断标准：
-✅ 正确的情况：
-- 红圈在"妙搭"/"妙搭助手"等应用的图标或名称上
-- 红圈在消息类别的第一条聊天记录上
-- 红圈在标签栏下方的第一个结果项上
+判断标准（必须全部满足才返回OK）：
+✅ 正确的情况（必须同时满足以下2条）：
+- 红圈在搜索结果列表的第一条项目上（带图标的应用名称或聊天记录）
+- 红圈的y坐标明显在标签栏下方（标签栏是"消息|云文档|应用|联系人"那行文字）
 
-❌ 错误的情况（必须拒绝）：
-- 红圈在左侧的消息列表上
+❌ 错误的情况（只要满足1条就返回NO）：
+- 红圈在左侧飞书导航栏上
 - 红圈在搜索框内
-- 红圈在标签栏上
+- 红圈在标签栏（"消息|云文档|应用|联系人"）上
 - 红圈在空白区域
-- 红圈在任何非搜索结果的区域
+- 红圈在第二条及以后的搜索结果上
+- 红圈在任何非"第一条结果"的区域
 
 返回格式：
-如果位置正确，返回：OK
-如果位置错误，返回：NO + 错误原因（一句话即可）
-例如：OK 或 NO: 红圈在左侧消息列表"""
+如果位置正确且确实是第一条结果：返回 OK
+如果位置错误：返回 NO + 错误原因（一句话）
+例如：OK 或 NO: 红圈在左侧导航栏的第二项上"""
 
 VERIFY_PROMPT = """你是一个飞书界面分析专家。请对比这两张截图的变化。
 
@@ -239,9 +239,16 @@ def validate_coordinates(x, y):
 
     # 搜索框/标签栏通常在顶部区域，排除 y < 屏幕高度15% 的区域
     min_y = int(pyautogui.size()[1] * 0.15)
+
+    # 增加边界模糊区检测：y 在 12%~17% 之间是标签栏/结果的过渡区，需要额外警惕
+    warning_min_y = int(screen_h * 0.12)
+    warning_max_y = int(screen_h * 0.18)
+
     if y < min_y:
         print(f"  ⚠️ Y坐标 {y} 太小（< {min_y}px），可能指向搜索框或标签栏")
         return False
+    elif warning_min_y <= y <= warning_max_y:
+        print(f"  ⚡ Y坐标 {y} 处于标签栏/结果过渡区（{warning_min_y}~{warning_max_y}），需VLM重点确认")
 
     return True
 
@@ -308,6 +315,8 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
     coords = None
     MAX_LOCATE_RETRIES = 3
     marked_path = None
+    pre_click_shot = None
+    pre_click_marked = None
 
     for locate_attempt in range(1, MAX_LOCATE_RETRIES + 1):
         print(f"\n🔍 [阶段1] VLM 定位搜索结果 (尝试 {locate_attempt}/{MAX_LOCATE_RETRIES})...")
@@ -404,7 +413,40 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
 
         if confirm_result and confirm_result.upper().startswith("OK"):
             print("  ✅ VLM 确认：位置正确 ✓")
-            break  # 确认成功，跳出确认循环
+
+            # ====== 阶段2.5：鼠标到位后的二次视觉验证 ======
+            # 在真正点击前，截一张"鼠标已移动到目标位置"的图
+            # 用红圈标记当前鼠标位置，让VLM最后确认一次
+            print("  🔍 [阶段2.5] 点击前最终验证（截取鼠标当前位置）...")
+            time.sleep(0.3)
+            pre_click_shot = os.path.join(SCREENSHOT_DIR, f"step04_preclick_{timestamp}.png")
+            pyautogui.screenshot(pre_click_shot)
+            pre_click_marked = draw_crosshair_on_image(pre_click_shot, int(x), int(y))
+
+            FINAL_CHECK_PROMPT = """这是点击前的最后一张截图。红圈标记了鼠标即将点击的位置。
+请做最终确认：红圈是否精确落在【搜索结果列表的第一条】上？
+- 注意：第一条结果应该在标签栏下方，带有图标
+- 如果红圈位置正确：返回 FINAL_OK
+- 如果红圈位置有偏差或不在第一条上：返回 FINAL_NO + 原因"""
+            final_check = call_vlm(pre_click_marked, FINAL_CHECK_PROMPT, timeout=30)
+            if final_check and "FINAL_OK" in final_check.upper():
+                print("  ✅ 最终验证通过，执行点击")
+            elif final_check and "FINAL_NO" in final_check.upper():
+                print(f"  ⚠️ 最终验证未通过: {final_check}")
+                print("  🔄 尝试用坐标微调重新定位...")
+                # 微调策略：y坐标下移30px重试（常见偏差是偏上到标签栏）
+                y_adjusted = y + 30
+                if validate_coordinates(x, y_adjusted):
+                    print(f"  🎯 微调坐标: ({x}, {y}) → ({x}, {y_adjusted})")
+                    x, y = x, y_adjusted
+                    pyautogui.moveTo(x, y, duration=0.8)
+                    time.sleep(0.5)
+                else:
+                    print(f"  ⚠️ 微调坐标无效，使用原坐标继续")
+            else:
+                print(f"  ⚠️ 最终验证结果不明确: {final_check}，使用原坐标继续")
+
+            break  # 确认成功+最终验证完成，跳出确认循环
         elif confirm_result and confirm_result.upper().startswith("NO"):
             print(f"  ❌ VLM 拒绝：{confirm_result}")
             if confirm_attempt < MAX_LOCATE_RETRIES:
@@ -487,11 +529,14 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
         print(f"  ⚠️ [阶段4] 验证调用失败: {e}（不影响主流程）")
 
     # 清理标记临时文件
-    try:
-        if marked_path != before_path:
-            os.remove(marked_path)
-    except:
-        pass
+    for tmp_path in [marked_path, pre_click_shot, pre_click_marked]:
+        try:
+            if tmp_path and os.path.exists(tmp_path) and tmp_path != before_path:
+                os.remove(tmp_path)
+        except (NameError, TypeError):
+            pass  # 变量未定义说明该步骤未执行
+        except Exception:
+            pass
 
     # 停止可视化
     if visualizer:
