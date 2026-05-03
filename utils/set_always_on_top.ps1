@@ -32,20 +32,32 @@ $title = "Larker"
 $hwnd = [IntPtr]::Zero
 
 # 方法1：通过 Get-Process 获取 MainWindowHandle（最可靠）
-Write-Output "正在查找 Chrome 窗口（标题: $title）..."
+Write-Output "正在查找 Overlay 窗口..."
 $chromeProcs = Get-Process chrome -ErrorAction SilentlyContinue
+
 foreach ($proc in $chromeProcs) {
     $mainTitle = $proc.MainWindowTitle
     if ($mainTitle -and $mainTitle -ne "") {
+        # 精确匹配 "Larker"（Chrome --app 模式正常时）
         if ($mainTitle -eq $title) {
             $hwnd = $proc.MainWindowHandle
-            Write-Output "  ✓ 找到精确匹配: '$mainTitle' (PID=$($proc.Id), HWND=$hwnd)"
-            break
-        } elseif ($mainTitle -like "*$title*") {
-            $hwnd = $proc.MainWindowHandle
-            Write-Output "  ✓ 找到模糊匹配: '$mainTitle' (PID=$($proc.Id), HWND=$hwnd)"
+            Write-Output "  ✓ 精确匹配: '$mainTitle' (PID=$($proc.Id), HWND=$hwnd)"
             break
         }
+        # 匹配 localhost:8088（Chrome --app 未生效时的回退）
+        if ($mainTitle -like "*8088*") {
+            $hwnd = $proc.MainWindowHandle
+            Write-Output "  ✓ 匹配端口: '$mainTitle' (PID=$($proc.Id), HWND=$hwnd)"
+            break
+        }
+        # 匹配 "localhost"（另一种可能的标题）
+        if ($mainTitle -like "*localhost*") {
+            $hwnd = $proc.MainWindowHandle
+            Write-Output "  ✓ 匹配 localhost: '$mainTitle' (PID=$($proc.Id), HWND=$hwnd)"
+            break
+        }
+        # 记录所有 Chrome 窗口用于调试
+        Write-Output "  ? Chrome 窗口: '$mainTitle' (PID=$($proc.Id), HWND=$($proc.MainWindowHandle))"
     }
 }
 

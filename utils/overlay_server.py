@@ -164,12 +164,29 @@ def launch():
 
     # 启动 Chrome --app
     try:
+        # 使用 --app 参数启动无地址栏的独立窗口
+        # 注意：Chrome 不同版本对 --app 格式要求不同：
+        #   新版: chrome.exe --app="http://..."
+        #   旧版: chrome.exe --app=http://...
+        # 统一使用引号包裹URL确保兼容性
+        app_url = f"http://localhost:{PORT}"
+        chrome_args = [
+            chrome,
+            f"--app={app_url}",
+            f"--window-position={pos_x},{pos_y}",
+            f"--window-size={win_w},{win_h}",
+            "--new-window",          # 强制新窗口
+            "--no-first-run",
+            "--no-default-browser-check",
+        ]
+        print(f"[Larker Overlay] 🚀 启动参数: {chrome_args}")
         chrome_proc = subprocess.Popen(
-            [chrome, f"--app={url}",
-             f"--window-position={pos_x},{pos_y}",
-             f"--window-size={win_w},{win_h}",
-             "--no-first-run", "--no-default-browser-check",
-             "--disable-infobars"],
+            chrome_args,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,  # 隐藏控制台窗口
+        ) if os.name == 'nt' else subprocess.Popen(
+            chrome_args,
             stderr=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
