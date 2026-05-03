@@ -91,17 +91,18 @@ def start_server():
 
 
 def _get_screen_size():
-    """获取屏幕分辨率（DPI-aware）"""
+    """获取屏幕逻辑分辨率（与 pyautogui.screenshot 一致）"""
     try:
-        user32 = ctypes.windll.user32
-        user32.SetProcessDPIAware()
-        w = user32.GetSystemMetrics(0)
-        h = user32.GetSystemMetrics(1)
+        import pyautogui
+        w, h = pyautogui.size()
         return w, h
     except Exception:
         try:
-            import pyautogui
-            return pyautogui.size()
+            user32 = ctypes.windll.user32
+            user32.SetProcessDPIAware()
+            w = user32.GetSystemMetrics(0)
+            h = user32.GetSystemMetrics(1)
+            return w, h
         except Exception:
             return 1920, 1080
 
@@ -197,15 +198,15 @@ def launch():
         webbrowser.open(url)
         return t
 
-    # 后台设置 Always on Top
-    ps_script = Path(__file__).parent / "set_always_on_top.ps1"
+    # 后台设置 Always on Top（使用 Python 脚本，避免 PowerShell 环境变量超限问题）
+    py_script = Path(__file__).parent / "set_always_on_top.py"
 
     def _set_top():
         time.sleep(2)
         for attempt in range(15):
             try:
                 r = subprocess.run(
-                    ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(ps_script)],
+                    [sys.executable, str(py_script)],
                     capture_output=True, text=True, timeout=10,
                 )
                 stdout_clean = (r.stdout or "").strip()
@@ -214,8 +215,15 @@ def launch():
                     break
                 elif attempt % 3 == 0:
                     print(f"[Larker Overlay] ⏳ 窗口尚未就绪，等待中... (第{attempt+1}/15次)")
+                # 打印调试信息
+                if r.stdout:
+                    for line in r.stdout.strip().splitlines():
+                        print(f"  [PS] {line}")
+                if r.stderr:
+                    for line in r.stderr.strip().splitlines():
+                        print(f"  [PS-ERR] {line}")
             except subprocess.TimeoutExpired:
-                print(f"[Larker Overlay] ⚠️ PowerShell 执行超时 (第{attempt+1}次)")
+                print(f"[Larker Overlay] ⚠️ 置顶脚本执行超时 (第{attempt+1}次)")
             except Exception as e:
                 if attempt < 3:
                     print(f"[Larker Overlay] ⚠️ 置顶脚本异常: {e}")

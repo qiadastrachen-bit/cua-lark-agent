@@ -28,7 +28,7 @@ def get_search_text():
 def activate_feishu_window():
     """激活飞书窗口"""
     try:
-        windows = gw.findWindows(title="飞书")
+        windows = gw.getWindowsWithTitle("飞书")
         if windows:
             win = windows[0]
             win.activate()
