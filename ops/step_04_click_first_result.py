@@ -447,10 +447,43 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
             # 在真正点击前，截一张"鼠标已移动到目标位置"的图
             # 用红圈标记当前鼠标位置，让VLM最后确认一次
             print("  🔍 [阶段2.5] 点击前最终验证（截取鼠标当前位置）...")
+            
+            # 🔧 修复截图全黑问题：重新激活飞书窗口并等待渲染
+            try:
+                import pygetwindow as gw
+                wins = gw.getWindowsWithTitle("飞书") or gw.getWindowsWithTitle("Lark")
+                if wins:
+                    wins[0].activate()
+                    time.sleep(0.8)  # 等待窗口渲染完成
+                    print("  📌 已重新激活飞书窗口（防黑屏）")
+                else:
+                    print("  ⚠️ 未找到飞书窗口，继续截图")
+            except Exception as e:
+                print(f"  ⚠️ 窗口激活失败: {e}")
+            
             time.sleep(0.3)
             pre_click_shot = os.path.join(SCREENSHOT_DIR, f"step04_preclick_{timestamp}.png")
             pyautogui.screenshot(pre_click_shot)
-            pre_click_marked = draw_crosshair_on_image(pre_click_shot, int(x), int(y))
+            
+            # 🔧 黑屏检测：如果截取到的是黑屏或接近黑色，回退到 before_path
+            try:
+                img_check = cv2.imread(pre_click_shot)
+                if img_check is not None:
+                    mean_brightness = img_check.mean()
+                    if mean_brightness < 10:  # 平均亮度 < 10 视为黑屏
+                        print(f"  ⚠️ 检测到黑屏画面（亮度={mean_brightness:.1f}），使用操作前截图替代")
+                        # 使用 before_path 作为替代截图
+                        pre_click_marked = draw_crosshair_on_image(before_path, int(x), int(y))
+                        print("  🔄 已切换为操作前截图进行最终验证")
+                    else:
+                        pre_click_marked = draw_crosshair_on_image(pre_click_shot, int(x), int(y))
+                        print(f"  📸 截图正常（亮度={mean_brightness:.1f}）")
+                else:
+                    pre_click_marked = draw_crosshair_on_image(before_path, int(x), int(y))
+                    print("  ⚠️ 截图文件读取失败，使用操作前截图替代")
+            except Exception as e:
+                pre_click_marked = draw_crosshair_on_image(pre_click_shot, int(x), int(y))
+                print(f"  ⚠️ 黑屏检测异常: {e}，继续使用当前截图")
 
             FINAL_CHECK_PROMPT = """这是点击前的最后一张截图。红圈标记了鼠标即将点击的位置。
 请做最终确认：红圈是否精确落在【搜索结果列表的第一条】上？
