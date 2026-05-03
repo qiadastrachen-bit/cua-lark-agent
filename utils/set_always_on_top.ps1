@@ -1,21 +1,23 @@
 # 设置 Larker Overlay 窗口为 Always on Top
-# 通过窗口标题 "Larker" 匹配 Chrome --app 模式的窗口
+# 通过进程窗口标题或 MainWindowHandle 匹配 Chrome --app 模式的窗口
 
 Add-Type @"
   using System;
   using System.Runtime.InteropServices;
   public class Win32 {
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
       int X, int Y, int cx, int cy, uint uFlags);
-    [DllImport("user32.dll")]
-    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-    [DllImport("user32.dll")]
+
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-    [DllImport("user32.dll")]
+
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern bool IsWindowVisible(IntPtr hWnd);
-    [DllImport("user32.dll")]
+
+    [DllImport("user32.dll", SetLastError = true)]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
   }
@@ -27,33 +29,58 @@ $SWP_NOMOVE = 0x0002
 $SW_SHOW = 9
 
 $title = "Larker"
-$hwnd = [Win32]::FindWindow($null, $title)
+$hwnd = [IntPtr]::Zero
 
+# 方法1：通过 Get-Process 获取 MainWindowHandle（最可靠）
+Write-Output "正在查找 Chrome 窗口（标题: $title）..."
+$chromeProcs = Get-Process chrome -ErrorAction SilentlyContinue
+foreach ($proc in $chromeProcs) {
+    $mainTitle = $proc.MainWindowTitle
+    if ($mainTitle -and $mainTitle -ne "") {
+        if ($mainTitle -eq $title) {
+            $hwnd = $proc.MainWindowHandle
+            Write-Output "  ✓ 找到精确匹配: '$mainTitle' (PID=$($proc.Id), HWND=$hwnd)"
+            break
+        } elseif ($mainTitle -like "*$title*") {
+            $hwnd = $proc.MainWindowHandle
+            Write-Output "  ✓ 找到模糊匹配: '$mainTitle' (PID=$($proc.Id), HWND=$hwnd)"
+            break
+        }
+    }
+}
+
+# 方法2：枚举所有窗口标题（调试用，如果方法1失败）
+if ($hwnd -eq [IntPtr]::Zero) {
+    Write-Output "方法1失败，枚举所有 Chrome 窗口标题..."
+    foreach ($proc in $chromeProcs) {
+        $mainTitle = $proc.MainWindowTitle
+        if ($mainTitle -and $mainTitle -ne "") {
+            Write-Output "  Chrome 窗口: '$mainTitle' (PID=$($proc.Id), HWND=$($proc.MainWindowHandle))"
+        }
+    }
+}
+
+# 设置置顶
 if ($hwnd -ne [IntPtr]::Zero) {
     $visible = [Win32]::IsWindowVisible($hwnd)
     $rect = New-Object Win32+RECT
     [Win32]::GetWindowRect($hwnd, [ref]$rect) | Out-Null
 
-    # 先确保窗口可见（防止 Chrome --app 启动时最小化）
+    # 先确保窗口可见
     if (-not $visible) {
         [Win32]::ShowWindow($hwnd, $SW_SHOW)
+        Write-Output "  窗口已恢复显示（之前不可见）"
     }
 
     # 设置置顶
-    $result = [Win32]::SetWindowPos($hwnd, $HWND_TOPMOST, 0, 0, 0, 0, $SWP_NOSIZE -bor $SWP_NOMOVE)
+    $result = [Win32]::SetWindowPos($hwnd, [IntPtr]::new($HWND_TOPMOST), 0, 0, 0, 0, $SWP_NOSIZE -bor $SWP_NOMOVE)
     if ($result) {
         Write-Output "Set always-on-top: $title (hwnd=$hwnd, visible=$visible, pos=($($rect.Left),$($rect.Top)))"
     } else {
-        Write-Output "SetWindowPos failed for hwnd=$hwnd"
+        $errCode = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        Write-Output "SetWindowPos failed: hwnd=$hwnd, error=$errCode"
     }
 } else {
     Write-Output "Window not found: $title"
-    # 调试：列出所有 Chrome 窗口帮助排查
-    Write-Output "Enumerating Chrome windows..."
-    Get-Process chrome -ErrorAction SilentlyContinue | ForEach-Object {
-        $mainTitle = $_.MainWindowTitle
-        if ($mainTitle -and $mainTitle -ne "") {
-            Write-Output "  Chrome window: '$mainTitle'"
-        }
-    } | Select-Object -First 10
+    Write-Output "提示：请确认 Chrome --app 窗口已启动且标题为 '$title'"
 }
