@@ -47,7 +47,11 @@ def get_window_rect(hwnd):
 
 
 def set_always_on_top(hwnd):
-    """设置窗口置顶"""
+    """设置窗口置顶并激活到前台"""
+    # 强制激活到前台（比单纯置顶更强）
+    user32.SetForegroundWindow(hwnd)
+    user32.BringWindowToTop(hwnd)
+    
     # 确保窗口可见
     if not user32.IsWindowVisible(hwnd):
         user32.ShowWindow(hwnd, SW_SHOW)
@@ -63,7 +67,7 @@ def set_always_on_top(hwnd):
     
     left, top, right, bottom = get_window_rect(hwnd)
     if ret:
-        print(f"Set always-on-top: Larker (hwnd={hwnd}, pos=({left},{top}))")
+        print(f"Set always-on-top: Larker (hwnd={hwnd}, pos=({left},{top}), size={right-left}x{bottom-top})")
     else:
         err = ctypes.GetLastError()
         print(f"SetWindowPos failed: hwnd={hwnd}, error={err}")

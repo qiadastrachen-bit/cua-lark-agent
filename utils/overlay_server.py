@@ -91,17 +91,18 @@ def start_server():
 
 
 def _get_screen_size():
-    """获取屏幕逻辑分辨率（与 pyautogui.screenshot 一致）"""
+    """获取屏幕逻辑分辨率（通过实际截图尺寸，最可靠）"""
     try:
         import pyautogui
-        w, h = pyautogui.size()
+        # 方法1：用 screenshot 的实际尺寸（与 VLM 看到的一致）
+        img = pyautogui.screenshot()
+        w, h = img.size
         return w, h
     except Exception:
         try:
-            user32 = ctypes.windll.user32
-            user32.SetProcessDPIAware()
-            w = user32.GetSystemMetrics(0)
-            h = user32.GetSystemMetrics(1)
+            # 方法2：fallback 到 pyautogui.size()
+            import pyautogui
+            w, h = pyautogui.size()
             return w, h
         except Exception:
             return 1920, 1080
@@ -153,11 +154,12 @@ def launch():
 
     print(f"[Larker Overlay] ✅ Chrome 路径: {chrome}")
 
-    # 计算窗口位置
+    # 计算窗口位置（放在左上角，确保可见）
     screen_w, screen_h = _get_screen_size()
     win_w, win_h = 320, 560
-    pos_x = max(0, screen_w - win_w - 20)
-    pos_y = max(0, 40)
+    # 放在左上角 (100, 100)，确保不被任务栏或其他窗口遮挡
+    pos_x = 100
+    pos_y = 100
 
     url = f"http://localhost:{PORT}"
     print(f"[Larker Overlay] 📐 屏幕尺寸: {screen_w}x{screen_h}")
