@@ -98,22 +98,26 @@ CONFIRM_PROMPT = """你是一个飞书界面分析专家。请确认这张截图
 任务：判断红圈标记的位置是否是**搜索结果列表中的第一条可点击结果**。
 
 判断标准（必须全部满足才返回OK）：
-✅ 正确的情况（必须同时满足以下2条）：
+✅ 正确的情况（必须同时满足以下3条）：
 - 红圈在搜索结果列表的第一条项目上（带图标的应用名称或聊天记录）
 - 红圈的y坐标明显在标签栏下方（标签栏是"消息|云文档|应用|联系人"那行文字）
+- **红圈精确落在图标或文字上，而不是空白区域**
 
 ❌ 错误的情况（只要满足1条就返回NO）：
 - 红圈在左侧飞书导航栏上
 - 红圈在搜索框内
 - 红圈在标签栏（"消息|云文档|应用|联系人"）上
-- 红圈在空白区域
+- **红圈在空白区域（不在任何可点击元素上）**
 - 红圈在第二条及以后的搜索结果上
 - 红圈在任何非"第一条结果"的区域
+
+⚠️ 特别注意：如果红圈落在第一条结果的空白区域（比如图标和文字之间的空白处），必须返回NO
 
 返回格式：
 如果位置正确且确实是第一条结果：返回 OK
 如果位置错误：返回 NO + 错误原因（一句话）
-例如：OK 或 NO: 红圈在左侧导航栏的第二项上"""
+例如：OK 或 NO: 红圈在左侧导航栏的第二项上
+例如：OK 或 NO: 红圈在第一条结果的空白区域，不在可点击元素上"""
 
 VERIFY_PROMPT = """你是一个飞书界面分析专家。请对比这两张截图的变化。
 
@@ -221,8 +225,16 @@ def parse_vlm_coordinates(vlm_output):
     return None
 
 
-def validate_coordinates(x, y):
-    """基本坐标合理性检查"""
+def validate_coordinates(x, y, auto_adjust=True):
+    """基本坐标合理性检查
+    
+    Args:
+        x, y: 坐标
+        auto_adjust: 是否在过渡区自动调整
+    
+    Returns:
+        True/False 或 (True, adjusted_x, adjusted_y)
+    """
     screen_w, screen_h = pyautogui.size()
 
     # 边缘检查
@@ -240,7 +252,7 @@ def validate_coordinates(x, y):
     # 搜索框/标签栏通常在顶部区域，排除 y < 屏幕高度15% 的区域
     min_y = int(pyautogui.size()[1] * 0.15)
 
-    # 增加边界模糊区检测：y 在 12%~17% 之间是标签栏/结果的过渡区，需要额外警惕
+    # 边界模糊区检测：y 在 12%~18% 之间是标签栏/结果的过渡区
     warning_min_y = int(screen_h * 0.12)
     warning_max_y = int(screen_h * 0.18)
 
@@ -248,9 +260,24 @@ def validate_coordinates(x, y):
         print(f"  ⚠️ Y坐标 {y} 太小（< {min_y}px），可能指向搜索框或标签栏")
         return False
     elif warning_min_y <= y <= warning_max_y:
-        print(f"  ⚡ Y坐标 {y} 处于标签栏/结果过渡区（{warning_min_y}~{warning_max_y}），需VLM重点确认")
+        print(f"  ⚡ Y坐标 {y} 处于标签栏/结果过渡区（{warning_min_y}~{warning_max_y}）")
+        # 过渡区：自动向下偏移 40px
+        if auto_adjust:
+            y_adjusted = y + 40
+            print(f"  🎯 过渡区自动修正: ({x}, {y}) → ({x}, {y_adjusted})")
+            return (True, x, y_adjusted)
+        else:
+            print(f"  ⚡ 过渡区需VLM重点确认")
 
     return True
+
+
+def adjust_if_transition_zone(x, y):
+    """检查是否在过渡区，如果是则自动调整"""
+    result = validate_coordinates(x, y, auto_adjust=True)
+    if isinstance(result, tuple) and len(result) == 3:
+        return result[1], result[2]  # (adjusted_x, adjusted_y)
+    return x, y
 
 
 def draw_crosshair_on_image(image_path, x, y, radius=30, output_path=None):
@@ -384,6 +411,8 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
         return False
 
     x, y = coords
+    # 过渡区自动调整（如果在标签栏/结果过渡区，自动向下偏移）
+    x, y = adjust_if_transition_zone(x, y)
     print(f"  🎯 [阶段1] 最终定位: ({x}, {y})")
 
     # ====== 第二步：VLM 确认坐标正确性（复用同一重试循环） ======
@@ -433,16 +462,20 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
                 print("  ✅ 最终验证通过，执行点击")
             elif final_check and "FINAL_NO" in final_check.upper():
                 print(f"  ⚠️ 最终验证未通过: {final_check}")
-                print("  🔄 尝试用坐标微调重新定位...")
-                # 微调策略：y坐标下移30px重试（常见偏差是偏上到标签栏）
-                y_adjusted = y + 30
-                if validate_coordinates(x, y_adjusted):
+                # 微调策略：y坐标下移40px（加大偏移量，确保落到可点击区域）
+                y_adjusted = y + 40
+                adj_result = validate_coordinates(x, y_adjusted, auto_adjust=False)
+                if adj_result is True:
                     print(f"  🎯 微调坐标: ({x}, {y}) → ({x}, {y_adjusted})")
                     x, y = x, y_adjusted
                     pyautogui.moveTo(x, y, duration=0.8)
                     time.sleep(0.5)
+                    # 重新标记图片，继续确认循环（不跳出）
+                    marked_path = draw_crosshair_on_image(before_path, int(x), int(y))
+                    print(f"  🔄 已调整坐标，重新验证...")
+                    continue  # 重新进入确认循环，用新坐标再确认
                 else:
-                    print(f"  ⚠️ 微调坐标无效，使用原坐标继续")
+                    print(f"  ⚠️ 微调坐标无效（可能超出边界），使用原坐标继续")
             else:
                 print(f"  ⚠️ 最终验证结果不明确: {final_check}，使用原坐标继续")
 
@@ -461,6 +494,8 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
                     current_coords = parse_vlm_coordinates(vlm_output)
                     if current_coords and validate_coordinates(*current_coords):
                         x, y = current_coords
+                        # 应用过渡区自动调整
+                        x, y = adjust_if_transition_zone(x, y)
                         print(f"  🎯 重新定位坐标: ({x}, {y})")
                         continue  # 用新坐标继续确认循环
                 # 重新定位也失败了
