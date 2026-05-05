@@ -71,31 +71,43 @@ def verify_input():
     print(f"📌 请检查截图 {screenshot_path} 确认搜索建议是否正常出现")
     return screenshot_path
 
-def main(text=None):
+def input_search_text(search_term):
+    """在搜索框输入指定搜索词，返回标准执行结果"""
+    result = {
+        "success": False,
+        "screenshot": "",
+        "message": "",
+        "screenshots": []
+    }
     print("=" * 50)
     print("Step 02: 在搜索框输入文字")
     print("=" * 50)
     
-    # 获取搜索词（优先用传入参数）
-    search_text = text or get_search_text()
-    
-    # 激活飞书窗口
-    activate_feishu_window()
-    time.sleep(0.5)
-    
-    # 输入文字
-    input_text(search_text)
-    
-    # 等待建议
-    wait_for_suggestions()
-    
-    # 截图验证
-    verify_input()
+    try:
+        # 激活飞书窗口
+        activate_feishu_window()
+        time.sleep(0.5)
+        
+        # 输入文字
+        input_text(search_term)
+        
+        # 等待建议
+        wait_for_suggestions()
+        
+        # 截图验证
+        screenshot_path = take_screenshot("step02_after_input")
+        result["screenshot"] = str(screenshot_path)
+        result["screenshots"].append(str(screenshot_path))
+        
+        result["success"] = True
+        result["message"] = f"搜索词「{search_term}」输入成功"
+        print("✅ Step 02 完成！")
+    except Exception as e:
+        result["message"] = f"输入失败: {str(e)}"
+        print(f"❌ {result['message']}")
     
     print("=" * 50)
-    print("✅ Step 02 完成！")
-    print(f"📌 下一步：运行 step_03_select_result.py 选择搜索结果")
-    return True
+    return result
 
 if __name__ == "__main__":
-    main()
+    input_search_text(get_search_text())

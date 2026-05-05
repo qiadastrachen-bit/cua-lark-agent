@@ -201,38 +201,35 @@ def launch():
         webbrowser.open(url)
         return t
 
-    # 后台设置 Always on Top（使用 Python 脚本，避免 PowerShell 环境变量超限问题）
+    # 后台设置 Always on Top（set_always_on_top.py 内置重试逻辑）
     py_script = Path(__file__).parent / "set_always_on_top.py"
 
     def _set_top():
-        time.sleep(2)
-        for attempt in range(15):
-            try:
-                r = subprocess.run(
-                    [sys.executable, str(py_script)],
-                    capture_output=True, text=True, timeout=10,
-                )
-                stdout_clean = (r.stdout or "").strip()
-                if "Set always-on-top" in stdout_clean:
-                    print(f"[Larker Overlay] ✅ Always-on-top 设置成功 (第{attempt+1}次尝试)")
-                    break
-                elif attempt % 3 == 0:
-                    print(f"[Larker Overlay] ⏳ 窗口尚未就绪，等待中... (第{attempt+1}/15次)")
-                # 打印调试信息
-                if r.stdout:
-                    for line in r.stdout.strip().splitlines():
-                        print(f"  [PS] {line}")
-                if r.stderr:
-                    for line in r.stderr.strip().splitlines():
-                        print(f"  [PS-ERR] {line}")
-            except subprocess.TimeoutExpired:
-                print(f"[Larker Overlay] ⚠️ 置顶脚本执行超时 (第{attempt+1}次)")
-            except Exception as e:
-                if attempt < 3:
-                    print(f"[Larker Overlay] ⚠️ 置顶脚本异常: {e}")
-            time.sleep(1)
-        else:
-            print("[Larker Overlay] ⚠️ 15次尝试后仍无法设置置顶")
+        # 等待窗口出现
+        time.sleep(3)
+        
+        # 调用 Python 脚本，脚本内部有 15 次重试逻辑
+        try:
+            r = subprocess.run(
+                [sys.executable, str(py_script)],
+                capture_output=True, text=True, timeout=60,
+            )
+            # 打印脚本输出
+            if r.stdout:
+                for line in r.stdout.strip().splitlines():
+                    print(f"  [SetTop] {line}")
+            if r.stderr:
+                for line in r.stderr.strip().splitlines():
+                    print(f"  [SetTop-ERR] {line}")
+            
+            if r.returncode == 0:
+                print("[Larker Overlay] ✅ Always-on-top 设置成功")
+            else:
+                print("[Larker Overlay] ⚠️ 置顶脚本执行失败，请查看上方日志")
+        except subprocess.TimeoutExpired:
+            print("[Larker Overlay] ⚠️ 置顶脚本执行超时（60s）")
+        except Exception as e:
+            print(f"[Larker Overlay] ⚠️ 置顶脚本异常: {e}")
 
     threading.Thread(target=_set_top, daemon=True).start()
 

@@ -74,7 +74,7 @@ def verify_and_archive(step_results=None):
     """验证执行结果并归档
 
     Args:
-        step_results: run_all 传入的步骤执行结果列表。
+        step_results: run_all 传入的步骤执行结果列表（每项含 screenshot/screenshots 字段）。
                       如果为 None 或空，会尝试从截图推断（兼容单步运行）。
     """
     print("\n=== Step 05: 结果验证与归档 ===")
@@ -82,28 +82,45 @@ def verify_and_archive(step_results=None):
     # 兼容：如果外部没传 step_results，初始化为空
     if step_results is None:
         step_results = []
-    
-    # 获取最新的截图文件
-    screenshot_files = sorted(
-        [f for f in os.listdir(SCREENSHOT_DIR) if f.endswith(".png")],
-        key=lambda x: os.path.getctime(os.path.join(SCREENSHOT_DIR, x))
-    )
-    
-    if len(screenshot_files) < 4:  # 至少有step01/02/04的前后截图
-        print("⚠️  截图数量不足，跳过对比验证")
-        step_results = []
+
+    # 优先从 step_results 中提取当次执行的截图路径
+    current_screenshots = []
+    for sr in step_results:
+        if sr.get("screenshot"):
+            current_screenshots.append(sr["screenshot"])
+        if sr.get("screenshots"):
+            current_screenshots.extend(sr["screenshots"])
+
+    if len(current_screenshots) >= 4:
+        # 用当次执行的截图做对比（可靠）
+        step01_after = current_screenshots[0]   # step01 操作后截图
+        step02_after = current_screenshots[1]   # step02 操作后截图
+        step04_before = current_screenshots[2] if len(current_screenshots) > 2 else None
+        step04_after = current_screenshots[-1]  # 最后一张是 step04 操作后
+
+        if step04_before and os.path.exists(step04_before) and os.path.exists(step04_after):
+            sim_step04 = compare_images(step04_before, step04_after)
+            print(f"🔍 Step04 操作前后相似度: {sim_step04:.3f}")
+            if sim_step04 < 0.95:
+                print(f"  ✅ 检测到界面变化（点击可能成功）")
+            else:
+                print(f"  ⚠️ 界面几乎无变化（点击可能未生效）")
+    elif len(current_screenshots) >= 2:
+        print(f"📸 当次截图 {len(current_screenshots)} 张，跳过像素对比（不足4张）")
     else:
-        # 简单验证：操作前后截图对比
-        step01_before = os.path.join(SCREENSHOT_DIR, screenshot_files[-4])
-        step01_after = os.path.join(SCREENSHOT_DIR, screenshot_files[-3])
-        step04_before = os.path.join(SCREENSHOT_DIR, screenshot_files[-2])
-        step04_after = os.path.join(SCREENSHOT_DIR, screenshot_files[-1])
-        
-        sim_step01 = compare_images(step01_before, step01_after)
-        sim_step04 = compare_images(step04_before, step04_after)
-        
-        print(f"🔍 Step01 操作前后相似度: {sim_step01:.3f}")
-        print(f"🔍 Step04 操作前后相似度: {sim_step04:.3f}")
+        # 兜底：尝试从目录取最新截图（单步运行模式）
+        screenshot_files = sorted(
+            [f for f in os.listdir(SCREENSHOT_DIR) if f.endswith(".png")],
+            key=lambda x: os.path.getctime(os.path.join(SCREENSHOT_DIR, x))
+        )
+
+        if len(screenshot_files) < 2:
+            print("⚠️  截图数量不足，跳过对比验证")
+        else:
+            latest = os.path.join(SCREENSHOT_DIR, screenshot_files[-1])
+            prev = os.path.join(SCREENSHOT_DIR, screenshot_files[-2])
+            sim = compare_images(prev, latest)
+            print(f"🔍 最近两张截图相似度: {sim:.3f}")
     
     # 生成报告（优先使用外部传入的 step_results）
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

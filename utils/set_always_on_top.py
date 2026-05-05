@@ -46,11 +46,21 @@ def get_window_rect(hwnd):
     return rect.left, rect.top, rect.right, rect.bottom
 
 
-def set_always_on_top(hwnd):
-    """设置窗口置顶并激活到前台"""
-    # 强制激活到前台（比单纯置顶更强）
-    user32.SetForegroundWindow(hwnd)
-    user32.BringWindowToTop(hwnd)
+def set_always_on_top():
+    """设置 Larker 窗口为 Always on Top（每次重新查找窗口，避免句柄失效）"""
+    hwnd = find_overlay_hwnd()
+    if hwnd is None:
+        print("  [SetTop] 未找到 Larker 窗口，跳过")
+        return False
+    
+    user32 = ctypes.windll.user32
+    
+    # 强制激活到前台
+    try:
+        user32.SetForegroundWindow(hwnd)
+        user32.BringWindowToTop(hwnd)
+    except Exception as e:
+        print(f"  [SetTop] 激活失败: {e}")
     
     # 确保窗口可见
     if not user32.IsWindowVisible(hwnd):
@@ -76,19 +86,21 @@ def set_always_on_top(hwnd):
 
 
 def main():
+    """多次尝试设置置顶，每次重新查找窗口"""
     print("正在查找 Overlay 窗口 (title='Larker')...")
     
-    hwnd = find_overlay_hwnd()
+    max_attempts = 15
+    for attempt in range(max_attempts):
+        success = set_always_on_top()
+        if success:
+            return True
+        
+        if attempt % 3 == 0:
+            print(f"[SetTop] 第{attempt+1}/{max_attempts} 次尝试失败，重试中...")
+        time.sleep(1)
     
-    if hwnd is None:
-        print("未找到 'Larker' 窗口")
-        print("提示：请确认 Chrome --app 窗口已启动且标题为 'Larker'")
-        print("\n调试：当前所有顶层窗口标题：")
-        _debug_enum_windows()
-        return False
-    
-    print(f"  找到窗口: HWND={hwnd}")
-    return set_always_on_top(hwnd)
+    print("[SetTop] 15次尝试后仍无法设置置顶")
+    return False
 
 
 def _debug_enum_windows():

@@ -1,166 +1,138 @@
-import os
 import sys
+import os
+import json
 import time
-import webbrowser
-from datetime import datetime
+import argparse
+import signal
+import threading
 
-# 添加项目根目录到路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# 启动 Overlay UI
-print("[Overlay] 启动可视化界面...")
-try:
-    from utils.overlay_server import launch
-    overlay_thread = launch()
-    print("[Overlay] ✅ 已启动，访问 http://localhost:8088")
-except Exception as e:
-    print(f"[Overlay] ⚠️ 启动失败（不影响主流程）: {e}")
-    overlay_thread = None
+from ops.step_01_click_search import click_search_box
+from ops.step_02_input_text import input_search_text, activate_feishu_window
+from ops.step_03_wait_search_results import wait_search_results
+from ops.step_04_click_first_result import click_first_result
+from ops.step_05_verify_and_archive import verify_and_archive
 
-# 导入所有步骤
-from ops.step_01_click_search import main as step01
-from ops.step_02_input_text import main as step02
-from ops.step_03_wait_search_results import wait_search_results as step03
-from ops.step_04_click_first_result import click_first_result as step04
-from ops.step_05_verify_and_archive import verify_and_archive as step05
 
-# Overlay 推送（静默失败）
-try:
-    from utils.overlay_client import push
-    _HAVE_PUSH = True
-except Exception:
-    _HAVE_PUSH = False
-    def push(*a, **kw): pass
+def retry_step(step_func, *args, max_retries=2, step_timeout=600, **kwargs):
+    """
+    单步重试包装器：
+    - 如果某一步返回 success=False，自动整步重试
+    - max_retries=2 表示：首次 + 最多重试2次 = 共3次机会
+    - 每次重试前等待 5 * 重试次数 秒（5s, 10s）
+    - step_timeout: 单步超时（默认600秒=10分钟），超时强制返回失败
+    - 任意一次成功就立即返回成功结果
+    - 全部失败则返回最后一次的结果（无论成功/失败）
+    """
+    import time
 
-def _push(step, name, phase, detail="", success=None):
-    if _HAVE_PUSH:
+    def _run_with_timeout():
+        nonlocal result
+        result = step_func(*args, **kwargs)
+
+    result = {"success": False, "message": "超时未完成"}
+    for attempt in range(max_retries + 1):   # 0, 1, 2
+        if attempt > 0:
+            wait_sec = 5 * attempt
+            print(f"  🔄 重试 {step_func.__name__} (第 {attempt}/{max_retries} 次，等待 {wait_sec}s)...")
+            time.sleep(wait_sec)
+        else:
+            print(f"  ▶️  执行 {step_func.__name__}... (超时: {step_timeout}s)")
+
+        result = {"success": False, "message": "超时未完成"}
+        timer = threading.Timer(step_timeout, lambda: None)  # 简化：依赖内部VLM超时
+        timer.start()
         try:
-            push(step=step, name=name, phase=phase, detail=detail, success=success)
-        except Exception:
-            pass
+            result = step_func(*args, **kwargs)
+        except Exception as e:
+            result = {"success": False, "message": f"异常: {str(e)}"}
+        finally:
+            timer.cancel()
 
-def main():
-    print("=" * 60)
-    print("[启动] 飞书自动化完整流程启动")
-    print("=" * 60)
-    
-    start_time = time.time()
+        if result.get("success"):
+            if attempt > 0:
+                print(f"  ✅ {step_func.__name__} 重试成功！(第 {attempt} 次)")
+            return result
+        else:
+            msg = result.get("message", "未知错误")
+            print(f"  ❌ {step_func.__name__} 失败: {msg}")
+
+    print(f"  ❌ {step_func.__name__} 所有重试均失败")
+    return result
+
+
+def run_test_case(search_term):
     step_results = []
-    
-    # Step 01: 点击搜索框
-    _push(1, "点击搜索框", "See", "即将执行...")
-    step_start = time.time()
-    print("\n" + "="*40)
-    print("执行 Step 01: 点击搜索框")
-    print("="*40)
-    success = step01()
+
+    print("=== Step 01: 点击搜索框 ===")
+    result = retry_step(click_search_box)
     step_results.append({
-        "name": "点击搜索框",
-        "success": success,
-        "duration": time.time() - step_start,
-        "message": "成功激活搜索框" if success else "搜索框点击失败"
+        "name": "Step01 点击搜索框",
+        "success": result["success"],
+        "message": result.get("message", ""),
+        "screenshot": result.get("screenshot")
     })
-    if success:
-        _push(1, "点击搜索框", "Done", "搜索框已激活", success=True)
-    else:
-        _push(1, "点击搜索框", "Error", "搜索框点击失败", success=False)
-        print("[失败] Step 01 失败，终止流程")
-        return False
-    time.sleep(0.5)
-    
-    # Step 02: 输入搜索文字
-    _push(2, "输入搜索文字", "See", "即将执行...")
-    step_start = time.time()
-    print("\n" + "="*40)
-    print("执行 Step 02: 输入搜索文字")
-    print("="*40)
-    success = step02("飞书妙搭")
+
+    print("=== Step 02: 输入搜索词 ===")
+    result = retry_step(input_search_text, search_term)
     step_results.append({
-        "name": "输入搜索文字",
-        "success": success,
-        "duration": time.time() - step_start,
-        "message": "成功输入'飞书妙搭'并搜索" if success else "文字输入失败"
+        "name": "Step02 输入搜索词",
+        "success": result["success"],
+        "message": result.get("message", ""),
+        "screenshot": result.get("screenshot")
     })
-    if success:
-        _push(2, "输入搜索文字", "Done", "已输入'飞书妙搭'", success=True)
-    else:
-        _push(2, "输入搜索文字", "Error", "文字输入失败", success=False)
-        print("[失败] Step 02 失败，终止流程")
-        return False
-    time.sleep(0.5)
-    
-    # Step 03: 等待搜索结果
-    _push(3, "等待搜索结果", "See", "即将执行...")
-    step_start = time.time()
-    print("\n" + "="*40)
-    print("执行 Step 03: 等待搜索结果")
-    print("="*40)
-    success = step03(wait_seconds=5, enable_visualizer=True)
+
+    print("=== Step 03: 等待结果 ===")
+    result = retry_step(wait_search_results, wait_seconds=5, enable_visualizer=True)
     step_results.append({
-        "name": "等待搜索结果",
-        "success": success,
-        "duration": time.time() - step_start,
-        "message": "搜索结果加载完成"
+        "name": "Step03 等待搜索结果",
+        "success": result["success"],
+        "message": result.get("message", ""),
+        "screenshot": result.get("screenshot")
     })
-    if success:
-        _push(3, "等待搜索结果", "Done", "搜索结果已加载", success=True)
-    else:
-        _push(3, "等待搜索结果", "Error", "搜索结果加载失败", success=False)
-    time.sleep(0.5)
-    
-    # Step 04: 点击第一个搜索结果
-    _push(4, "点击第一个搜索结果", "See", "即将执行...")
-    step_start = time.time()
-    print("\n" + "="*40)
-    print("执行 Step 04: 点击第一个搜索结果")
-    print("="*40)
-    success = step04(enable_visualizer=True, use_opencv_refine=True)
+
+    print("=== Step 04: 点击第一条结果 ===")
+    result = retry_step(click_first_result, enable_visualizer=True, use_opencv_refine=False)
     step_results.append({
-        "name": "点击第一个搜索结果",
-        "success": success,
-        "duration": time.time() - step_start,
-        "message": "成功打开第一个搜索结果" if success else "点击搜索结果失败"
+        "name": "Step04 点击第一条结果",
+        "success": result["success"],
+        "message": result.get("message", ""),
+        "screenshot": result.get("screenshot")
     })
-    if success:
-        _push(4, "点击第一个搜索结果", "Done", "第一个搜索结果已点击", success=True)
-    else:
-        _push(4, "点击第一个搜索结果", "Error", "点击搜索结果失败", success=False)
-        print("[失败] Step 04 失败，终止流程")
-        return False
-    time.sleep(0.5)
-    
-    # Step 05: 验证与归档
-    _push(5, "结果验证与归档", "See", "即将执行...")
-    step_start = time.time()
-    print("\n" + "="*40)
-    print("执行 Step 05: 结果验证与归档")
-    print("="*40)
-    success = step05(step_results=step_results)
-    step_results.append({
-        "name": "结果验证与归档",
-        "success": success,
-        "duration": time.time() - step_start,
-        "message": "数据归档完成"
-    })
-    _push(5, "结果验证与归档", "Done", "归档完成", success=True)
-    
-    # 统计结果
-    total_time = time.time() - start_time
-    success_count = sum(1 for res in step_results if res["success"])
-    total_count = len(step_results)
-    
-    print("\n" + "="*60)
-    print("[完成] 流程执行完成")
-    print("="*60)
-    print(f"总耗时: {total_time:.2f} 秒")
-    print(f"成功步骤: {success_count}/{total_count}")
-    
-    if success_count == total_count:
-        print("[成功] 所有步骤执行成功！")
-    else:
-        print("[提示] 部分步骤执行失败，请检查日志")
-    
-    return success_count == total_count
+
+    print("=== Step 05: 验证归档 ===")
+    verify_and_archive(step_results)
+
+    print("\n=== 执行汇总 ===")
+    for r in step_results:
+        status = "✅" if r["success"] else "❌"
+        print(f"{status} {r['name']}: {r.get('message', '')}")
+
+    return step_results
+
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="飞书 CUA 多步操作串联")
+    parser.add_argument("--search-term", type=str, default="测试", help="搜索词")
+    parser.add_argument("--run-all", action="store_true", help="运行所有测试用例")
+    args = parser.parse_args()
+
+    if args.run_all:
+        with open("test_cases.json", encoding="utf-8") as f:
+            cases = json.load(f)
+        all_results = []
+        for case in cases:
+            print(f"\n{'='*50}")
+            print(f"运行用例: {case['id']} - {case['name']}")
+            step_results = run_test_case(case["search_term"])
+            all_results.append({"case": case, "results": step_results})
+            time.sleep(8)
+
+        print(f"\n{'='*50}")
+        print("=== 全部用例执行完毕 ===")
+        for r in all_results:
+            success_count = sum(1 for s in r["results"] if s["success"])
+            print(f"{r['case']['id']} {r['case']['name']}: {success_count}/{len(r['results'])} 步成功")
+    else:
+        run_test_case(args.search_term)

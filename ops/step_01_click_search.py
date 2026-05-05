@@ -29,12 +29,20 @@ def opencv_match(screenshot_path, template_path, threshold=0.5, max_y_ratio=0.25
     return None
 
 # ===== 主流程 =====
-def main():
+def click_search_box():
+    """点击飞书搜索框，返回标准执行结果"""
+    result = {
+        "success": False,
+        "screenshot": "",
+        "message": "",
+        "screenshots": []
+    }
     # 1. 检查模板文件
     if not os.path.exists(TEMPLATE_PATH):
-        print(f"错误：找不到模板文件 {TEMPLATE_PATH}")
-        print("请先截取搜索框图片保存为 assets/template_search_box.png")
-        return
+        msg = f"错误：找不到模板文件 {TEMPLATE_PATH}，请先截取搜索框图片保存为 assets/template_search_box.png"
+        result["message"] = msg
+        print(msg)
+        return result
     
     # 2. 激活飞书窗口
     print("步骤1: 激活飞书窗口...")
@@ -54,9 +62,10 @@ def main():
     # 3. 截取全屏
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
-    before_path = os.path.join(SCREENSHOT_DIR, f"before_{timestamp}.png")
+    before_path = os.path.join(SCREENSHOT_DIR, f"step01_before_{timestamp}.png")
     pyautogui.screenshot(before_path)
-    print(f"步骤2: 已保存截图")
+    result["screenshots"].append(str(before_path))
+    print(f"步骤2: 已保存截图 {before_path}")
     
     # 4. OpenCV 模板匹配（主手段，不调API）
     print("步骤3: OpenCV 模板匹配...")
@@ -66,9 +75,10 @@ def main():
         x, y, conf = match
         print(f"  ✓ 匹配成功! 坐标: ({x}, {y}), 置信度: {conf:.3f}")
     else:
-        print("  ✗ OpenCV 匹配失败，程序退出")
-        print("  提示：检查模板图是否正确，或尝试调低阈值")
-        return False
+        msg = "OpenCV 匹配失败，检查模板图是否正确，或尝试调低阈值"
+        result["message"] = msg
+        print(f"  ✗ {msg}")
+        return result
     
     # 5. 点击
     print(f"步骤4: 移动到 ({x}, {y}) 并点击...")
@@ -79,11 +89,16 @@ def main():
     time.sleep(2)
     
     # 6. 截取操作后截图
-    after_path = os.path.join(SCREENSHOT_DIR, f"after_{timestamp}.png")
+    after_path = os.path.join(SCREENSHOT_DIR, f"step01_after_{timestamp}.png")
     pyautogui.screenshot(after_path)
-    print(f"步骤5: 已保存操作后截图")
-    print("✓ 完成! 请确认搜索框是否被激活")
-    return True
+    result["screenshots"].append(str(after_path))
+    result["screenshot"] = str(after_path)
+    print(f"步骤5: 已保存操作后截图 {after_path}")
+    
+    result["success"] = True
+    result["message"] = "搜索框点击成功"
+    print("✓ 完成! 搜索框已激活")
+    return result
 
 if __name__ == "__main__":
-    main()
+    click_search_box()

@@ -1,0 +1,32 @@
+{
+  "execution_time": "2026-05-03 11:08:08",
+  "steps": [
+    {
+      "name": "点击搜索框",
+      "success": true,
+      "duration": 6.080244302749634,
+      "message": "成功激活搜索框"
+    },
+    {
+      "name": "输入搜索文字",
+      "success": true,
+      "duration": 3.815342903137207,
+      "message": "成功输入'飞书妙搭'并搜索"
+    },
+    {
+      "name": "等待搜索结果",
+      "success": true,
+      "duration": 5.020111083984375,
+      "message": "搜索结果加载完成"
+    },
+    {
+      "name": "点击第一个搜索结果",
+      "success": true,
+      "duration": 159.7576916217804,
+      "message": "成功打开第一个搜索结果"
+    }
+  ],
+  "total_steps": 4,
+  "success_steps": 4,
+  "status": "SUCCESS"
+}
