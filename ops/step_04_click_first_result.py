@@ -157,41 +157,23 @@ def parse_vlm_coordinates(vlm_output):
     return None
 
 
-def validate_coordinates(x, y, auto_adjust=True):
-    """基本坐标合理性检查"""
+def validate_coordinates(x, y):
+    """基本坐标合理性检查 —— 返回 True/False，不做坐标修改"""
     screen_w, screen_h = pyautogui.size()
 
     if x < MARGIN or x > screen_w - MARGIN or y < MARGIN or y > screen_h - MARGIN:
         print(f"  ⚠️ 坐标太靠近屏幕边缘: ({x}, {y}), 屏幕尺寸: {screen_w}x{screen_h}")
         return False
 
-    # 不再限制 X 坐标中间区域 —— 飞书搜索结果面板可能偏左/偏右
-    # 只保留 Y 坐标检查（防止点到搜索框或标签栏）
-    # 搜索结果第一条通常在 y=200~300 之间（2560x1600 屏幕）
-    min_y = int(screen_h * 0.10)  # ~160px，低于此值直接拒绝
-    warning_y = int(screen_h * 0.18)  # ~288px，此值以下给出警告但可通过
-
+    # 不限制 X 坐标中间区域 —— 飞书搜索结果面板可能偏左/偏右
+    # Y 坐标下限：只拒绝明显在顶栏区域的坐标（< 10% 屏幕高度）
+    min_y = int(screen_h * 0.10)  # ~160px
     if y < min_y:
         print(f"  ⚠️ Y坐标 {y} 太小（< {min_y}px），可能指向搜索框或标签栏")
         return False
-    elif y < warning_y:
-        print(f"  ⚡ Y坐标 {y} 处于搜索结果顶部区域（< {warning_y}px），可能是第一条结果")
-        if auto_adjust:
-            y_adjusted = y + 30
-            print(f"  🎯 顶部区域自动修正: ({x}, {y}) → ({x}, {y_adjusted})")
-            return (True, x, y_adjusted)
-        else:
-            print(f"  ⚡ 顶部区域未自动修正，请手动确认")
 
+    # 其他情况全部通过 —— 信任 VLM 定位能力
     return True
-
-
-def adjust_if_transition_zone(x, y):
-    """检查是否在过渡区，如果是则自动调整"""
-    result = validate_coordinates(x, y, auto_adjust=True)
-    if isinstance(result, tuple) and len(result) == 3:
-        return result[1], result[2]
-    return x, y
 
 
 def draw_crosshair_on_image(image_path, x, y, radius=30, output_path=None):
@@ -308,7 +290,6 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
         return result
 
     x, y = coords
-    x, y = adjust_if_transition_zone(x, y)
     print(f"  🎯 最终定位: ({x}, {y})")
 
     print(f"\n🖱️  [阶段2] 移动鼠标到 ({x}, {y})...")
