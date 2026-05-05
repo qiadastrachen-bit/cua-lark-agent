@@ -167,21 +167,21 @@ def validate_coordinates(x, y, auto_adjust=True):
 
     # 不再限制 X 坐标中间区域 —— 飞书搜索结果面板可能偏左/偏右
     # 只保留 Y 坐标检查（防止点到搜索框或标签栏）
-    min_y = int(screen_h * 0.15)
-    warning_min_y = int(screen_h * 0.12)
-    warning_max_y = int(screen_h * 0.18)
+    # 搜索结果第一条通常在 y=200~300 之间（2560x1600 屏幕）
+    min_y = int(screen_h * 0.10)  # ~160px，低于此值直接拒绝
+    warning_y = int(screen_h * 0.18)  # ~288px，此值以下给出警告但可通过
 
     if y < min_y:
         print(f"  ⚠️ Y坐标 {y} 太小（< {min_y}px），可能指向搜索框或标签栏")
         return False
-    elif warning_min_y <= y <= warning_max_y:
-        print(f"  ⚡ Y坐标 {y} 处于标签栏/结果过渡区（{warning_min_y}~{warning_max_y}）")
+    elif y < warning_y:
+        print(f"  ⚡ Y坐标 {y} 处于搜索结果顶部区域（< {warning_y}px），可能是第一条结果")
         if auto_adjust:
-            y_adjusted = y + 40
-            print(f"  🎯 过渡区自动修正: ({x}, {y}) → ({x}, {y_adjusted})")
+            y_adjusted = y + 30
+            print(f"  🎯 顶部区域自动修正: ({x}, {y}) → ({x}, {y_adjusted})")
             return (True, x, y_adjusted)
         else:
-            print(f"  ⚡ 过渡区需重点确认")
+            print(f"  ⚡ 顶部区域未自动修正，请手动确认")
 
     return True
 
