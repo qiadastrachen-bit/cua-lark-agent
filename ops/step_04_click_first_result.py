@@ -165,13 +165,9 @@ def validate_coordinates(x, y, auto_adjust=True):
         print(f"  ⚠️ 坐标太靠近屏幕边缘: ({x}, {y}), 屏幕尺寸: {screen_w}x{screen_h}")
         return False
 
-    min_x = int(screen_w * 0.25)
-    max_x = int(screen_w * 0.75)
-    if x < min_x or x > max_x:
-        print(f"  ⚠️ X坐标 {x} 不在中间有效区域（{min_x}~{max_x}），可能在左右边栏")
-        return False
-
-    min_y = int(pyautogui.size()[1] * 0.15)
+    # 不再限制 X 坐标中间区域 —— 飞书搜索结果面板可能偏左/偏右
+    # 只保留 Y 坐标检查（防止点到搜索框或标签栏）
+    min_y = int(screen_h * 0.15)
     warning_min_y = int(screen_h * 0.12)
     warning_max_y = int(screen_h * 0.18)
 
@@ -381,7 +377,7 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
     return result
 
 
-def opencv_match_template(screenshot_path, template_path, threshold=0.7, max_y_ratio=0.6):
+def opencv_match_template(screenshot_path, template_path, threshold=0.5, max_y_ratio=0.6):
     """OpenCV 模板匹配兜底"""
     screenshot = cv2.imread(screenshot_path)
     template = cv2.imread(template_path)
