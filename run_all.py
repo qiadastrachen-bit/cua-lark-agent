@@ -73,6 +73,7 @@ def run_test_case(search_term):
         "message": result.get("message", ""),
         "screenshot": result.get("screenshot")
     })
+    time.sleep(30)  # 给VLM配额恢复时间
 
     print("=== Step 02: 输入搜索词 ===")
     result = retry_step(input_search_text, search_term)
@@ -82,6 +83,7 @@ def run_test_case(search_term):
         "message": result.get("message", ""),
         "screenshot": result.get("screenshot")
     })
+    time.sleep(30)
 
     print("=== Step 03: 等待结果 ===")
     result = retry_step(wait_search_results, wait_seconds=5, enable_visualizer=True)
@@ -91,6 +93,7 @@ def run_test_case(search_term):
         "message": result.get("message", ""),
         "screenshot": result.get("screenshot")
     })
+    time.sleep(30)
 
     print("=== Step 04: 点击第一条结果 ===")
     result = retry_step(click_first_result, enable_visualizer=True, use_opencv_refine=False)
@@ -100,6 +103,7 @@ def run_test_case(search_term):
         "message": result.get("message", ""),
         "screenshot": result.get("screenshot")
     })
+    time.sleep(30)
 
     print("=== Step 05: 验证归档 ===")
     verify_and_archive(step_results)
@@ -127,7 +131,7 @@ if __name__ == "__main__":
             print(f"运行用例: {case['id']} - {case['name']}")
             step_results = run_test_case(case["search_term"])
             all_results.append({"case": case, "results": step_results})
-            time.sleep(8)
+            time.sleep(90)  # 用例间长延迟，让TPM配额充分恢复
 
         print(f"\n{'='*50}")
         print("=== 全部用例执行完毕 ===")

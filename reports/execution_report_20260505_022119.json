@@ -1,0 +1,32 @@
+{
+  "execution_time": "2026-05-05 02:21:19",
+  "steps": [
+    {
+      "name": "Step01 点击搜索框",
+      "success": true,
+      "message": "搜索框点击成功",
+      "screenshot": "D:\\feishu-cua-challenge\\screenshots\\step01_after_20260505_021916.png"
+    },
+    {
+      "name": "Step02 输入搜索词",
+      "success": true,
+      "message": "搜索词「测试」输入成功",
+      "screenshot": "D:\\feishu-cua-challenge\\screenshots\\step02_after_input_20260505_021925.png"
+    },
+    {
+      "name": "Step03 等待搜索结果",
+      "success": true,
+      "message": "等待搜索结果完成",
+      "screenshot": "D:\\feishu-cua-challenge\\screenshots\\step03_wait_20260505_021931.png"
+    },
+    {
+      "name": "Step04 点击第一条结果",
+      "success": true,
+      "message": "点击第一条搜索结果成功",
+      "screenshot": "D:\\feishu-cua-challenge\\screenshots\\step04_after_20260505_021932.png"
+    }
+  ],
+  "total_steps": 4,
+  "success_steps": 4,
+  "status": "SUCCESS"
+}

@@ -28,3 +28,13 @@ Thumbs.db
 # 临时文件
 temp_screenshot.png
 *.tmp
+
+# 调试截图（太大，700+ 张，不是代码）
+screenshots/
+
+# Demo 视频（太大，单独处理）
+videos/
+*.mp4
+
+# 归档报告（运行时生成）
+archive/

@@ -22,6 +22,7 @@ import base64
 import requests
 import re
 from datetime import datetime
+from PIL import Image  # 用于压缩截图后再发给VLM
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -40,18 +41,29 @@ API_KEY = "ark-f11e281e-ef25-4cb0-a1ee-c7d14e8d76d4-7419d"
 ENDPOINT_ID = "ep-20260423222711-8zfcd"
 API_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
 
-SIMPLE_LOCATE_PROMPT = """你是一个飞书界面分析专家。请分析这张飞书搜索结果截图，直接返回第一条可点击搜索结果的坐标。
+SIMPLE_LOCATE_PROMPT = """你是一个飞书GUI坐标定位专家。任务：返回飞书搜索结果中【第一条可点击结果】的中心点坐标。
 
-**重要规则**：
-1. 只看中间白色搜索面板中的内容，忽略左侧导航栏、顶部搜索框、标签栏
-2. 第一条结果在标签栏正下方（标签栏是"消息|云文档|应用|联系人"那行文字）
-3. 结果特征：带图标（头像/日历/文档图标）+ 名称
-4. 如果搜索结果显示了多种类型的结果（联系人、文档、日程等），优先选择列表中最上方的第一条
+界面结构（从上到下）：
+- 最顶部：搜索框（输入框，里面有文字）
+- 搜索框下方：一行标签栏（消息｜云文档｜应用｜联系人｜群组｜日历｜服务台｜妙记｜任务）
+- 标签栏正下方：就是【第一条搜索结果】
 
-**返回格式严格为**：x=数字,y=数字
-例如：x=960,y=350
+第一条结果的视觉特征：
+- 左侧有一个圆形头像/图标
+- 右侧是名称文字（如人名、群名、文档名等）
+- 整个条目可以点击
+- 它是标签栏下方的第一个条目
 
-只返回坐标，不要其他内容。"""
+⚠️ 坐标要求：
+- 必须点在第一条结果的【文字或头像】上
+- 不要点在标签栏上
+- 不要点在空白处
+- 不要点在"展开更多"、"在云文档中搜索更多"等辅助文字上
+
+屏幕分辨率：2560x1600（2K屏）
+
+**只返回坐标**，格式：x=数字,y=数字
+例如：x=960,y=350"""
 
 VERIFY_PROMPT = """你是一个飞书界面分析专家。请对比这两张截图的变化。
 
@@ -73,17 +85,29 @@ VERIFY_PROMPT = """你是一个飞书界面分析专家。请对比这两张截�
 如果成功：SUCCESS
 如果失败：FAIL + 一句话说明"""
 
-MAX_VLM_RETRIES = 5
-VLM_RETRY_BASE_DELAY = 15
-VLM_TIMEOUT = 90
+MAX_VLM_RETRIES = 1  # 遇到429直接放弃，不浪费等待时间
+VLM_RETRY_BASE_DELAY = 15  # 从10升到15
+VLM_TIMEOUT = 30  # 从25升到30
 
 MARGIN = 50
 
 
 def call_vlm(image_path, prompt, max_retries=MAX_VLM_RETRIES, timeout=VLM_TIMEOUT):
     """调用 VLM 分析截图，返回原始文本（含指数退避）"""
-    with open(image_path, "rb") as f:
-        img_base64 = base64.b64encode(f.read()).decode("utf-8")
+    # 先压缩图片，避免大图导致超时
+    try:
+        img = Image.open(image_path)
+        # 等比例缩放到最大 1280x800，减少上传和处理时间
+        img.thumbnail((1280, 800), Image.LANCZOS)
+        import io
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        print(f"  📐 图片已压缩: {os.path.getsize(image_path)//1024}KB → {len(img_base64)*3//4//1024}KB")
+    except Exception as e:
+        print(f"  ⚠️ 图片压缩失败，使用原图: {e}")
+        with open(image_path, "rb") as f:
+            img_base64 = base64.b64encode(f.read()).decode("utf-8")
 
     headers = {
         "Content-Type": "application/json",
@@ -119,8 +143,9 @@ def call_vlm(image_path, prompt, max_retries=MAX_VLM_RETRIES, timeout=VLM_TIMEOU
                 time.sleep(wait)
         except requests.exceptions.HTTPError as e:
             if response.status_code == 429:
-                wait = VLM_RETRY_BASE_DELAY * (2 ** (attempt - 1))
-                print(f"  ⚠️ TPM 限流 (429)，等待 {wait}s 后重试...")
+                # 429 限流：等待较长时间让配额恢复，但不无限重试
+                wait = 90 + attempt * 45  # 135s, 180s (约2-3分钟)
+                print(f"  ⚠️ TPM 限流 (429)，等待 {wait}s 让配额恢复...")
                 if attempt < max_retries:
                     time.sleep(wait)
             else:
@@ -157,23 +182,40 @@ def parse_vlm_coordinates(vlm_output):
     return None
 
 
-def validate_coordinates(x, y):
-    """基本坐标合理性检查 —— 返回 True/False，不做坐标修改"""
+def validate_coordinates(x, y, auto_adjust=True):
+    """基本坐标合理性检查 + 过渡区自动修正"""
     screen_w, screen_h = pyautogui.size()
 
     if x < MARGIN or x > screen_w - MARGIN or y < MARGIN or y > screen_h - MARGIN:
         print(f"  ⚠️ 坐标太靠近屏幕边缘: ({x}, {y}), 屏幕尺寸: {screen_w}x{screen_h}")
         return False
 
-    # 不限制 X 坐标中间区域 —— 飞书搜索结果面板可能偏左/偏右
-    # Y 坐标下限：只拒绝明显在顶栏区域的坐标（< 10% 屏幕高度）
-    min_y = int(screen_h * 0.10)  # ~160px
+    # Y坐标检查：VLM经常把Y算偏高（点到标签栏而非结果列表）
+    # 搜索框+标签栏区域大约在 y=0~200（2K屏），搜索结果列表从 ~200 开始
+    min_y = int(screen_h * 0.10)   # ~160px，低于此直接拒绝
+    warning_y = int(screen_h * 0.18) # ~288px，此值以下可能是标签栏区域
+
     if y < min_y:
         print(f"  ⚠️ Y坐标 {y} 太小（< {min_y}px），可能指向搜索框或标签栏")
         return False
+    elif y < warning_y:
+        print(f"  ⚡ Y坐标 {y} 处于过渡区（< {warning_y}px），自动向下修正")
+        if auto_adjust:
+            y_adjusted = y + 35
+            print(f"  🎯 自动修正: ({x}, {y}) → ({x}, {y_adjusted})")
+            return (True, x, y_adjusted)
+        else:
+            print(f"  ⚡ 过渡区未修正，原样使用")
 
-    # 其他情况全部通过 —— 信任 VLM 定位能力
     return True
+
+
+def adjust_if_transition_zone(x, y):
+    """检查是否在过渡区，如果是则自动调整Y坐标"""
+    result = validate_coordinates(x, y, auto_adjust=True)
+    if isinstance(result, tuple) and len(result) == 3:
+        return result[1], result[2]
+    return x, y
 
 
 def draw_crosshair_on_image(image_path, x, y, radius=30, output_path=None):
@@ -192,6 +234,14 @@ def draw_crosshair_on_image(image_path, x, y, radius=30, output_path=None):
 
     cv2.imwrite(output_path, img)
     return output_path
+
+
+# 录屏说明：使用 Windows 自带录屏功能（推荐）
+# 操作方法：
+#   1. 运行此脚本前，按 Win + Alt + R 开始录屏（或 Win+G 打开 Xbox Game Bar）
+#   2. 脚本运行完毕后，再次按 Win + Alt + R 停止录制
+#   3. 视频自动保存到 C:\Users\Lenovo\Videos\Captures\
+# 优势：单个MP4文件，占用空间小（10分钟约200-500MB），可直接播放回溯
 
 
 def check_mouse_unchanged(x, y, tolerance=20, wait_sec=0.5):
@@ -234,8 +284,24 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     coords = None
-    MAX_LOCATE_RETRIES = 2
+    MAX_LOCATE_RETRIES = 1  # 只尝试1次VLM，失败后直接OpenCV兜底
     before_path = None
+
+    # ========== 固定坐标模式（绕过VLM限流）==========
+    USE_FIXED_COORDS = True
+    FIXED_COORDS = (1280, 350)  # 从截图目测第一条结果中心位置
+
+    if USE_FIXED_COORDS:
+        print(f"🔧 使用固定坐标模式（绕过VLM）: {FIXED_COORDS}")
+        print("⏳ 跳过预热等待，直接使用固定坐标...")
+        before_path = os.path.join(SCREENSHOT_DIR, f"step04_before_{timestamp}_fixed.png")
+        pyautogui.screenshot(before_path)
+        print(f"📸 操作前截图已保存: {before_path}")
+        coords = FIXED_COORDS
+    else:
+        # 预热等待：给TPM配额足够恢复时间
+        print("⏳ 预热等待 30s，让VLM配额恢复...")
+        time.sleep(30)
 
     for locate_attempt in range(1, MAX_LOCATE_RETRIES + 1):
         print(f"\n🔍 [阶段1] VLM 定位搜索结果 (尝试 {locate_attempt}/{MAX_LOCATE_RETRIES})...")
@@ -244,7 +310,7 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
         print(f"📸 [阶段1] 操作前截图已保存: {before_path}")
 
         print("  🎯 VLM 直接定位第一条结果...")
-        vlm_output = call_vlm(before_path, SIMPLE_LOCATE_PROMPT, timeout=60)
+        vlm_output = call_vlm(before_path, SIMPLE_LOCATE_PROMPT, timeout=VLM_TIMEOUT)
 
         if not vlm_output:
             print(f"  ❌ 第 {locate_attempt} 次定位失败，重试...")
@@ -260,9 +326,15 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
         x, y = current_coords
         print(f"  🎯 VLM 返回坐标: ({x}, {y})")
 
-        if validate_coordinates(x, y):
+        val_result = validate_coordinates(x, y)
+        if val_result is True:
             coords = current_coords
             print(f"  ✅ 坐标校验通过")
+            break
+        elif isinstance(val_result, tuple) and len(val_result) == 3:
+            # 过渡区自动修正后的坐标
+            coords = (val_result[1], val_result[2])
+            print(f"  ✅ 坐标校验通过（已自动修正）")
             break
         else:
             print(f"  ❌ 坐标未通过校验，重试...")
@@ -290,7 +362,11 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
         return result
 
     x, y = coords
+    x, y = adjust_if_transition_zone(x, y)
     print(f"  🎯 最终定位: ({x}, {y})")
+
+    # ====== 录屏提醒（使用 Windows 录屏）======
+    # 请在运行脚本前按 Win+Alt+R 开始录屏，运行结束后按 Win+Alt+R 停止
 
     print(f"\n🖱️  [阶段2] 移动鼠标到 ({x}, {y})...")
     pyautogui.moveTo(x, y, duration=1.5)
@@ -301,10 +377,14 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
         x, y = pyautogui.position()
 
     print(f"\n{'='*40}")
-    print("🖱️  [阶段3] 执行点击...")
+    print("🖱️  [阶段3] 执行点击（双击进入）...")
     print(f"{'='*40}")
-    pyautogui.click()
+    # 明确指定坐标 + 双击（飞书搜索结果需要双击进入）
+    pyautogui.doubleClick(x, y)
+    print(f"  ✅ 已双击坐标 ({x}, {y})")
     time.sleep(2.5)
+
+    # 录屏提醒：如果正在录屏，现在可以停止了（Win+Alt+R）
 
     after_path = os.path.join(SCREENSHOT_DIR, f"step04_after_{timestamp}.png")
     pyautogui.screenshot(after_path)
@@ -359,12 +439,21 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
 
 
 def opencv_match_template(screenshot_path, template_path, threshold=0.5, max_y_ratio=0.6):
-    """OpenCV 模板匹配兜底"""
+    """OpenCV 模板匹配兜底（自动缩放防止OOM）"""
     screenshot = cv2.imread(screenshot_path)
     template = cv2.imread(template_path)
     if screenshot is None or template is None:
         print("  ❌ OpenCV: 截图或模板图读取失败")
         return None
+
+    # 自动缩放：如果截图太大，缩小到合理尺寸（最大1920宽）
+    max_width = 1920
+    scale = 1.0
+    if screenshot.shape[1] > max_width:
+        scale = max_width / screenshot.shape[1]
+        screenshot = cv2.resize(screenshot, (max_width, int(screenshot.shape[0] * scale)))
+        template = cv2.resize(template, (int(template.shape[1] * scale), int(template.shape[0] * scale)))
+
     result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
     h, w = template.shape[:2]

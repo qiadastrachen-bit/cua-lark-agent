@@ -1,0 +1,32 @@
+{
+  "execution_time": "2026-05-05 17:04:46",
+  "steps": [
+    {
+      "name": "Step01 点击搜索框",
+      "success": false,
+      "message": "OpenCV 匹配失败，检查模板图是否正确，或尝试调低阈值",
+      "screenshot": ""
+    },
+    {
+      "name": "Step02 输入搜索词",
+      "success": false,
+      "message": "输入失败: Error calling OpenClipboard ([WinError 0] 操作成功完成。)",
+      "screenshot": ""
+    },
+    {
+      "name": "Step03 等待搜索结果",
+      "success": true,
+      "message": "等待搜索结果完成",
+      "screenshot": "D:\\feishu-cua-challenge\\screenshots\\step03_wait_20260505_163630.png"
+    },
+    {
+      "name": "Step04 点击第一条结果",
+      "success": false,
+      "message": "VLM定位和OpenCV兜底均失败",
+      "screenshot": null
+    }
+  ],
+  "total_steps": 4,
+  "success_steps": 1,
+  "status": "FAILED"
+}

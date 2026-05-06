@@ -1,0 +1,32 @@
+{
+  "execution_time": "2026-05-05 20:35:37",
+  "steps": [
+    {
+      "name": "Step01 点击搜索框",
+      "success": false,
+      "message": "OpenCV 匹配失败，检查模板图是否正确，或尝试调低阈值",
+      "screenshot": ""
+    },
+    {
+      "name": "Step02 输入搜索词",
+      "success": true,
+      "message": "搜索词「文档」输入成功",
+      "screenshot": "D:\\feishu-cua-challenge\\screenshots\\step02_after_input_20260505_202405.png"
+    },
+    {
+      "name": "Step03 等待搜索结果",
+      "success": true,
+      "message": "等待搜索结果完成",
+      "screenshot": "D:\\feishu-cua-challenge\\screenshots\\step03_wait_20260505_202411.png"
+    },
+    {
+      "name": "Step04 点击第一条结果",
+      "success": true,
+      "message": "点击第一条搜索结果成功",
+      "screenshot": "D:\\feishu-cua-challenge\\screenshots\\step04_after_20260505_202905.png"
+    }
+  ],
+  "total_steps": 4,
+  "success_steps": 3,
+  "status": "FAILED"
+}
