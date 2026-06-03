@@ -104,8 +104,8 @@ User Instruction
 ## Quick Start
 
 ```bash
-git clone https://github.com/qiadastrachen-bit/cua-lark-agent.git
-cd cua-lark-agent
+git clone https://github.com/qiadastrachen-bit/larker.git
+cd larker
 
 pip install -r requirements.txt
 
@@ -143,7 +143,7 @@ python run_e2e_with_recording.py
 ## Project Structure
 
 ```
-cua-lark-agent/
+larker/
 ├── run_all.py                       # Main entry: 5-step pipeline
 ├── run_e2e_with_recording.py        # E2E test + screen recording
 ├── config.py                        # Centralized config (API keys, feature flags)
