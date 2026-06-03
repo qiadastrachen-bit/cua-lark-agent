@@ -175,3 +175,7 @@ Larker began as a submission to the 2026 Feishu CUA Challenge (Track 5: CUA-Lark
 ## License
 
 MIT
+
+## Recently updated
+
+2026.6.3 Chen JinTong
