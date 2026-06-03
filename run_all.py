@@ -96,7 +96,9 @@ def run_test_case(search_term):
     time.sleep(30)
 
     print("=== Step 04: 点击第一条结果 ===")
-    result = retry_step(click_first_result, enable_visualizer=True, use_opencv_refine=False)
+    # use_opencv_refine=True: VLM 定位后 OpenCV 精定位（双轨定位完整版）
+    # 设为 False 可跳过 OpenCV 精定位（调试/纯 VLM 对比时用）
+    result = retry_step(click_first_result, enable_visualizer=True, use_opencv_refine=True)
     step_results.append({
         "name": "Step04 点击第一条结果",
         "success": result["success"],

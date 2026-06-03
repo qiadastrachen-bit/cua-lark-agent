@@ -1,9 +1,14 @@
 import pyautogui
 import base64
 import os
+import sys
 import requests
 import time
 from datetime import datetime
+
+# 确保能导入项目根目录的 config
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import API_KEY, ENDPOINT_ID, API_URL
 
 def take_screenshot_and_analyze(prompt="请描述这张截图的内容", save_md=True, delay=0):
     # 延迟截图（给用户切换窗口的时间）
@@ -27,10 +32,7 @@ def take_screenshot_and_analyze(prompt="请描述这张截图的内容", save_md
     # 删除临时文件
     os.remove(temp_img_path)
     
-    # 3. 配置API参数
-    API_KEY = "ark-f11e281e-ef25-4cb0-a1ee-c7d14e8d76d4-7419d"
-    ENDPOINT_ID = "ep-20260423222711-8zfcd"
-    API_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+    # 3. 使用统一配置中的 API 参数（不再硬编码）
     
     # 4. 构造请求头
     headers = {

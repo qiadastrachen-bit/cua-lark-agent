@@ -23,6 +23,10 @@ import requests
 import re
 from datetime import datetime
 from PIL import Image  # 用于压缩截图后再发给VLM
+from config import API_KEY, ENDPOINT_ID, API_URL, PROJECT_ROOT, USE_FIXED_COORDS, FIXED_COORDS
+
+# SCREENSHOT_DIR 统一使用项目相对路径
+SCREENSHOT_DIR = str(PROJECT_ROOT / "screenshots")
 
 try:
     sys.stdout.reconfigure(encoding='utf-8')
@@ -34,12 +38,6 @@ except AttributeError:
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.mouse_visualizer import MouseVisualizer
-
-SCREENSHOT_DIR = "D:\\feishu-cua-challenge\\screenshots"
-
-API_KEY = "ark-f11e281e-ef25-4cb0-a1ee-c7d14e8d76d4-7419d"
-ENDPOINT_ID = "ep-20260423222711-8zfcd"
-API_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
 
 SIMPLE_LOCATE_PROMPT = """你是一个飞书GUI坐标定位专家。任务：返回飞书搜索结果中【第一条可点击结果】的中心点坐标。
 
@@ -287,9 +285,10 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
     MAX_LOCATE_RETRIES = 1  # 只尝试1次VLM，失败后直接OpenCV兜底
     before_path = None
 
-    # ========== 固定坐标模式（绕过VLM限流）==========
-    USE_FIXED_COORDS = True
-    FIXED_COORDS = (1280, 350)  # 从截图目测第一条结果中心位置
+    # ========== 固定坐标模式（调试/限流绕行）==========
+    # USE_FIXED_COORDS 通过 .env 或 config.py 控制，默认 False
+    # 设为 True 时跳过 VLM 定位，直接用固定坐标 (1280, 350) 点击
+    # 用途：VLM 429 限流时临时绕行 / 快速验证点击逻辑 / CI 环境无 API Key
 
     if USE_FIXED_COORDS:
         print(f"🔧 使用固定坐标模式（绕过VLM）: {FIXED_COORDS}")

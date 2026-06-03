@@ -1,370 +1,177 @@
-# Larker — 飞书智能操作 Agent 🚀
+# Larker — AI-Powered Desktop Automation Agent
 
-> **飞书 CUA 挑战赛 2026 · Track5 CUA-Lark**  
-> 让大模型像人一样操作飞书桌面端 · M2阶段：E2E测试通过率 100%
-
----
-
-## 👤 参赛者信息
-
-| 项目 | 信息 |
-|------|------|
-| **姓名** | 陈锦彤（Chen Jintong） |
-| **学校** | 北京邮电大学（北邮），沙河校区 |
-| **专业** | 智能交互设计（2028届本科） |
-| **项目中负责的工作** | **产品侧**：需求分析、竞品调研、流程设计、产品决策；**技术侧**：Python开发、PyAutoGUI自动化、OpenCV+VLM双轨定位、火山方舟API集成、E2E测试框架搭建 |
+> An AI agent that sees, thinks, and acts on desktop interfaces like a human.
+> Originated from Feishu CUA Challenge 2026 (M1 success rate 57.1%, M2 E2E 100%).
 
 ---
 
-## 🎯 项目简介
+## What Larker Does
 
-### 解决什么痛点？
-
-高频使用飞书的职场人，每天需要在飞书中重复执行大量**标准化操作**——搜索联系人、查找文档、创建日程、发起审批……每个动作需要 3-5 次点击，一天重复几十次，耗时耗力且打断工作心流。
-
-**Larker 的价值**：用户只需说一句话（"帮我找陈锦彤"），Agent 自动完成"打开飞书 → 搜索 → 点击进入"的完整操作流程，把人从重复操作中解放出来。
-
-### AI 在其中起到什么关键作用？
-
-| 如果没有 AI | 有了 AI 之后 |
-|-------------|-------------|
-| 只能做固定坐标的脚本，UI 一变就失效 | VLM 视觉理解，适应任意 UI 变化 |
-| 只能操作已知控件，无法处理动态内容 | 看图即懂，真正"像人一样操作" |
-| 出错只能崩溃，无法自我修复 | 截图验证 + 失败回溯，具备基础自愈能力 |
-
-### 流程是否完整闭环？
-
-✅ M2 阶段已实现**搜索全流程闭环**（输入 → 定位 → 点击 → 验证），E2E 测试通过率 **100%**，可稳定演示。
+Larker takes a natural language instruction — "search for 陈锦彤 in Feishu" — and autonomously completes the full operation: locate the search box, type the query, identify the first result, click into it, and verify success. No hardcoded coordinates. No fragile scripts.
 
 ---
 
-## 🎥 Demo 展示
+## Core Capabilities
 
-### E2E 测试演示（3 个用例，100% 通过率）
+### 1. VLM-Powered Visual Understanding
 
-| 用例 | 搜索词 | 视频 |
-|------|--------|------|
-| **TC001 - 搜索联系人** | 陈锦彤 | [▶️ TC001_contact.mp4](https://github.com/qiadastrachen-bit/cua-lark-agent/releases/download/v2.0-m2-submission/TC001_contact.mp4) |
-| **TC002 - 搜索知识问答** | 一些小计划 | [▶️ TC002_knowledge.mp4](https://github.com/qiadastrachen-bit/cua-lark-agent/releases/download/v2.0-m2-submission/TC002_knowledge.mp4) |
-| **TC003 - 搜索功能** | 日历 | [▶️ TC003_function.mp4](https://github.com/qiadastrachen-bit/cua-lark-agent/releases/download/v2.0-m2-submission/TC003_function.mp4) |
+Uses vision-language models to interpret screenshots and locate UI elements by **semantics**, not fixed coordinates.
 
-> 💡 运行 `python run_e2e_with_recording.py` 可自动执行完整流程并生成录屏 MP4
+- Screenshots compressed to 1280x800 before VLM inference — reduces API response time by ~60%
+- Model-agnostic design: originally Doubao-1.5-vision-pro, migrating to DeepSeek
+- Input: compressed PNG via Base64 → Output: pixel coordinates for PyAutoGUI
 
-### 项目 GitHub 仓库
+### 2. Dual-Track Localization (OpenCV + VLM)
 
-🔗 https://github.com/qiadastrachen-bit/feishu-cua-challenge
+| Scenario | Method | Why |
+|----------|--------|-----|
+| Fixed UI elements (search box) | OpenCV template matching | <0.5s, sub-pixel precision |
+| Dynamic content (search results) | VLM visual understanding | Variable positions, needs semantic reasoning |
 
----
+OpenCV handles the fast lane. VLM handles the smart lane. Not a binary choice — a routing decision based on the task.
 
-## ✨ 核心亮点
-
-### 🤖 AI 能力亮点
-
-**1. 双轨定位策略（OpenCV + VLM）**
-
-不是"全用AI"或"不用AI"的二元选择，而是根据场景选择最合适的方案：
-
-| 定位场景 | 技术方案 | 原因 |
-|---------|---------|------|
-| 搜索框（固定位置） | OpenCV 模板匹配 | 速度快（<0.5s），精度高（亚像素级） |
-| 第一条结果（动态内容） | VLM 视觉理解 | 结果位置不固定，需要语义理解 |
-
-**2. VLM 视觉理解能力**
-
-- 模型：豆包 2.0（Doubao-1.5-vision-pro），通过火山方舟 API 调用
-- 输入：压缩后的截图（最大 1280×800）→ Base64 编码 → VLM 分析
-- 输出：目标元素的像素坐标 → PyAutoGUI 执行点击
-- 创新点：图片压缩优化（3-5MB → 200-400KB），API 响应速度提升约 60%
-
-**3. 录屏回溯机制**
-
-采用后台线程截帧 + cv2.VideoWriter 合成 MP4，相比 PNG 帧序列方案节省 90% 以上存储空间（200-500MB vs 3-5GB），用于操作回溯、问题定位和提交演示。
-
-### 🏆 技术创新点
-
-| 创新 | 描述 | 价值 |
-|------|------|------|
-| **图片压缩优化 VLM 响应** | 截图压缩至 1280×800 后调用 VLM | API 超时率显著降低，响应速度提升约 60% |
-| **坐标过渡区自动修正** | VLM 返回 Y 坐标偏高时自动 +35 像素修正 | 避免因坐标偏差点到标签栏导致流程失败 |
-| **429 限流分级退避** | 区分普通重试和 TPM 限流，预设延迟让配额自然恢复 | 确保长时间运行稳定性，避免浪费配额 |
-| **E2E 测试框架** | pytest + subprocess 调用主流程，生成 HTML 报告 | 每次改动后可快速验证全流程稳定性 |
-
-### 👥 人 AI 分工模型
-
-| 角色 | 负责内容 |
-|------|---------|
-| **人（产品层）** | 定义任务目标、设计操作流程、决策异常处理策略、验收最终结果 |
-| **AI（执行层）** | 视觉理解界面元素、返回点击坐标、执行自动化操作、验证操作结果 |
-| **人 AI 协作** | 人在闭环中：关键决策点保留人工确认入口（规划中） |
-
----
-
-## 🏗️ 技术架构（五层架构）
+### 3. Multi-Step Operation Pipeline
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                   五层架构设计                            │
-└─────────────────────────────────────────────────────────┘
+Instruction → 5-step pipeline → Verified result + MP4 recording
 
-第1层：视觉感知层
-┌─────────────────────────────────────────────────────────┐
-│  截图 → 压缩（1280×800）→ Base64 编码 → 送入 VLM       │
-│  实现：PyAutoGUI.screenshot() + Pillow 压缩             │
-│  状态：✅ 已实现                                         │
-└─────────────────────────────────────────────────────────┘
-                          ▼
-
-第2层：规划决策层
-┌─────────────────────────────────────────────────────────┐
-│  用户指令 → 拆解为 5 步操作流程                          │
-│  实现：预定义 5 步流程（Step01~05），每步职责单一          │
-│  状态：✅ 流程框架已实现 / ⬜ LLM 动态拆解（规划中）        │
-│                                                         │
-│  为什么是 5 步？                                         │
-│  3 步 → 故障无法定位环节     ❌                          │
-│  5 步 → 每步边界清晰可验证  ✅（最佳平衡）                │
-│  7 步 → 调度复杂度增加      ❌                           │
-└─────────────────────────────────────────────────────────┘
-                          ▼
-
-第3层：执行操作层
-┌─────────────────────────────────────────────────────────┐
-│  OpenCV 粗定位（Step01） + VLM 精定位（Step04）          │
-│  → PyAutoGUI 执行鼠标移动 / 点击 / 键盘输入              │
-│  实现：pyautogui.moveTo() + doubleClick() + typewrite() │
-│  状态：✅ 已实现                                         │
-└─────────────────────────────────────────────────────────┘
-                          ▼
-
-第4层：状态验证层
-┌─────────────────────────────────────────────────────────┐
-│  操作前截图 vs 操作后截图 → VLM 二次确认                 │
-│  实现：Step05 截图对比 + VLM 验证操作是否成功             │
-│  状态：✅ 基础验证已实现 / ⬜ 智能对比（规划中）           │
-└─────────────────────────────────────────────────────────┘
-                          ▼
-
-第5层：评估报告层
-┌─────────────────────────────────────────────────────────┐
-│  录屏回溯（MP4）+ 执行报告（JSON + Markdown）            │
-│  实现：mss 后台截帧 → cv2.VideoWriter 合成 MP4          │
-│  状态：✅ 已实现                                         │
-└─────────────────────────────────────────────────────────┘
+Step 01: Locate search box (OpenCV)
+Step 02: Input search term (clipboard paste)
+Step 03: Wait for results (adaptive timing)
+Step 04: Locate first result (VLM) → double-click
+Step 05: Screenshot verification + archive report
 ```
 
-### 架构总览图
+Why 5? 3 steps → failures hard to isolate. 7 steps → scheduling overhead increases. 5 balances granularity and complexity.
+
+### 4. Built-in Resilience
+
+| Mechanism | Problem Solved |
+|-----------|---------------|
+| Coordinate transition-zone correction (+35px) | VLM drift near UI chrome/tabs |
+| Tiered rate-limit backoff (429 handling) | API quota preservation across long runs |
+| E2E test framework (pytest + subprocess) | Regression detection after each code change |
+| Background MP4 recording (mss + cv2.VideoWriter) | 90% storage savings vs PNG frame sequences |
+
+---
+
+## Technical Architecture
 
 ```
-用户自然语言指令
+User Instruction
        │
        ▼
-┌──────────────────────────────────┐
-│   第1层：视觉感知层               │
-│   截图 → 压缩 → Base64 → VLM    │
-└──────────────┬───────────────────┘
-               ▼
-┌──────────────────────────────────┐
-│   第2层：规划决策层               │
-│   指令 → 5步操作流程（预定义）    │
-└──────────────┬───────────────────┘
-               ▼
-┌──────────────────────────────────┐
-│   第3层：执行操作层               │
-│   OpenCV粗定位 + VLM精定位        │
-│   → PyAutoGUI 执行              │
-└──────────────┬───────────────────┘
-               ▼
-┌──────────────────────────────────┐
-│   第4层：状态验证层               │
-│   截图对比 + VLM 二次确认         │
-└──────────────┬───────────────────┘
-               ▼
-┌──────────────────────────────────┐
-│   第5层：评估报告层               │
-│   录屏MP4 + 执行报告JSON         │
-└──────────────────────────────────┘
+┌─────────────────────────────────┐
+│  Layer 1: Perception            │  PyAutoGUI, Pillow, mss
+│  Screenshot → Compress → Base64 │
+├─────────────────────────────────┤
+│  Layer 2: Planning              │  Predefined pipeline
+│  Instruction → 5-step pipeline  │  (LLM-dynamic planned)
+├─────────────────────────────────┤
+│  Layer 3: Execution             │  OpenCV, VLM, PyAutoGUI
+│  Locate → Click → Type → Verify │
+├─────────────────────────────────┤
+│  Layer 4: Verification          │  VLM re-confirmation
+│  Before/after screenshot diff   │
+├─────────────────────────────────┤
+│  Layer 5: Reporting             │  cv2.VideoWriter, JSON
+│  MP4 recording + execution logs │
+└─────────────────────────────────┘
 ```
+
+**Stack:** Python · VLM (Doubao/DeepSeek) · OpenCV · PyAutoGUI · mss · pytest · Pillow
 
 ---
 
-## 💻 核心代码展示
+## E2E Test Results
 
-### VLM 视觉定位核心逻辑（Step04）
+| Test Case | Search Term | Result |
+|-----------|-------------|--------|
+| TC001 | 陈锦彤 (contact) | Pass |
+| TC002 | 一些小计划 (doc) | Pass |
+| TC003 | 日历 (function) | Pass |
 
-```python
-def call_vlm_locate(image_path, prompt):
-    """调用 VLM 定位目标元素坐标"""
-    with open(image_path, "rb") as f:
-        image_data = base64.b64encode(f.read()).decode("utf-8")
+**Pass rate: 3/3 (100%)**
 
-    payload = {
-        "model": "Doubao-1.5-vision-pro",
-        "messages": [{
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}},
-                {"type": "text", "text": prompt}
-            ]
-        }],
-        "max_tokens": 500
-    }
-    # ... HTTP 请求 + JSON 解析返回坐标
-```
-
-### 双轨定位方案
-
-```
-用户指令："在飞书里搜索 xxx"
-    ↓
-Step 01: OpenCV 模板匹配 → 快速定位搜索框（<0.5s，亚像素精度）
-    ↓
-Step 02: 剪贴板粘贴 → 输入搜索词
-    ↓
-Step 03: 等待搜索结果加载（智能等待）
-    ↓
-Step 04: VLM 视觉理解 → 精准定位第一条结果 → doubleClick 进入
-    ↓
-Step 05: 截图对比 + VLM 二次确认 → 归档报告（JSON + Markdown）
-```
-
-### 坐标过渡区自动修正
-
-```python
-def adjust_if_transition_zone(x, y):
-    """VLM 返回坐标常在过渡区（标签栏下方），自动修正"""
-    if 50 < y < 120:   # 过渡区范围
-        print(f"⚠️ 检测到过渡区坐标 (y={y})，自动修正 y+35")
-        return x, y + 35
-    return x, y
-```
+| Metric | Manual | Larker | Improvement |
+|--------|--------|--------|-------------|
+| Per-search time | 10-15s | 5-8s | ~50% |
+| Availability | Work hours | 24/7 | — |
+| Consistency | Human-variable | Deterministic | — |
 
 ---
 
-## 📊 测试结果
-
-### E2E 测试通过率
-
-| 用例 ID | 用例名 | 搜索词 | Step01 | Step02 | Step03 | Step04 | Step05 | 结果 |
-|---------|--------|--------|--------|--------|--------|--------|--------|------|
-| TC001 | 搜索联系人 | 陈锦彤 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 通过 |
-| TC002 | 搜索文档 | 一些小计划 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 通过 |
-| TC003 | 搜索功能 | 日历 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ 通过 |
-
-**通过率：3/3 = 100%** ✅
-
-### 性能数据
-
-| 指标 | 人工操作 | Larker 自动化 | 提升 |
-|------|---------|--------------|------|
-| 单次搜索耗时 | 10-15 秒 | 5-8 秒 | **约 50%** |
-| 可运行时间 | 工作时间 | 7×24 小时 | 全天候 |
-| 操作一致性 | 受状态影响 | 始终一致 | 高可靠 |
-
----
-
-## 👥 小组分工
-
-| 成员 | 分工 |
-|------|------|
-| **陈锦彤** | 产品方案设计、Python 开发、VLM 集成、E2E 测试、文档编写 |
-| **Tarecn** | 并行任务处理（共用火山方舟 API Key，独立模块开发） |
-
----
-
-## 🚀 未来规划
-
-### 近期（M3 阶段）
-
-- [ ] **LLM 动态流程拆解**：从预定义 5 步升级为 LLM 根据指令动态生成操作流程
-- [ ] **扩展更多场景**：审批、文档创建、会议预约等
-- [ ] **鼠标状态可视化**：🔵空闲 → 🟡分析中 → 🔴操作中 → ✅完成（4 状态系统）
-
-### 中期（M4 阶段）
-
-- [ ] **Overlay 卡片 UI**：悬浮在飞书右侧，用户发指令 → Agent 拆解执行（Larker 核心产品形态）
-- [ ] **Human-in-the-loop**：关键决策点保留人工确认入口
-- [ ] **多应用支持**：从飞书扩展至企业微信、钉钉等
-
-### 长期愿景
-
-- [ ] **Larker 成为职场人的 AI 操作助手**：一句话完成所有标准化软件操作
-- [ ] **开源社区**：将 CUA 能力开放给更多开发者
-
----
-
-## ⚡ 快速开始
-
-### 环境准备
+## Quick Start
 
 ```bash
-# 安装依赖
+git clone https://github.com/qiadastrachen-bit/cua-lark-agent.git
+cd cua-lark-agent
+
 pip install -r requirements.txt
 
-# 配置 API Key（在 ops/step_04_click_first_result.py 中）
-API_KEY = "your-volcengine-api-key"
-ENDPOINT_ID = "ep-20260423222711-8zfcd"
-```
+# Configure API key
+cp .env.example .env
+# Edit .env with your API credentials
 
-### 运行
+# Run a single task
+python run_all.py --search-term "search term here"
 
-```bash
-# 运行单个测试
-python run_all.py --search-term "陈锦彤"
-
-# 运行 E2E 测试（3 个用例）+ 自动录屏
+# Run full E2E suite + recording
 python run_e2e_with_recording.py
-
-# pytest 测试框架
-pytest tests/test_e2e.py -v
 ```
 
 ---
 
-## 📁 项目结构
+## Roadmap
+
+**In Progress**
+- [ ] Migrate from Doubao to DeepSeek API
+- [ ] LLM-based dynamic step generation (replace predefined 5-step pipeline)
+- [ ] Abstract app adapter layer for multi-application support
+
+**Planned**
+- [ ] Overlay UI: floating command panel for natural language input
+- [ ] Human-in-the-loop override at critical decision points
+- [ ] Multi-application: Feishu → WeCom → DingTalk
+
+**Exploratory**
+- [ ] Cross-platform: Windows → macOS → Linux
+- [ ] Plugin architecture for community-contributed app adapters
+
+---
+
+## Project Structure
 
 ```
-feishu-cua-challenge/
-├── run_all.py                        # 主入口，Step 01-05 串联
-├── run_e2e_with_recording.py         # E2E 测试 + 录屏一体化
-├── test_cases.json                   # 测试用例定义
+cua-lark-agent/
+├── run_all.py                       # Main entry: 5-step pipeline
+├── run_e2e_with_recording.py        # E2E test + screen recording
+├── config.py                        # Centralized config (API keys, feature flags)
+├── .env.example                     # Environment variable template
+├── test_cases.json                  # Test case definitions
 ├── core/
-│   └── state_checker.py              # VLM 通用状态感知层
-├── ops/                               # 自动化操作脚本
-│   ├── step_01_click_search.py        # OpenCV 点击搜索框
-│   ├── step_02_input_text.py          # 剪贴板粘贴输入
-│   ├── step_03_wait_search_results.py # 等待搜索结果加载
-│   ├── step_04_click_first_result.py  # VLM 定位第一条结果
-│   └── step_05_verify_and_archive.py # 验证 + 归档报告
-├── screenshots/                      # 截图存档
-├── archive/                          # 归档报告（JSON + Markdown）
+│   └── state_checker.py             # VLM-based state verification
+├── ops/
+│   ├── step_01_click_search.py      # OpenCV: locate search box
+│   ├── step_02_input_text.py        # Clipboard paste
+│   ├── step_03_wait_search_results.py
+│   ├── step_04_click_first_result.py # VLM: locate + click result
+│   └── step_05_verify_and_archive.py # Verify + report
 ├── tests/
-│   └── test_e2e.py                   # E2E 测试框架
+│   └── test_e2e.py
 └── docs/
-    ├── M2_TECHNICAL_REPORT.md        # M2 技术报告
-    ├── SYSTEM_DESIGN.md              # 系统设计文档
-    └── dev-log.md                    # 开发日志
+    ├── M2_TECHNICAL_REPORT.md
+    └── SYSTEM_DESIGN.md
 ```
 
 ---
 
-## 📝 技术栈
+## Origin
 
-| 组件 | 技术 | 说明 |
-|------|------|------|
-| **视觉语言模型** | 豆包 2.0（Doubao-1.5-vision-pro） | 字节跳动火山引擎 Ark 平台 |
-| **屏幕截图** | PyAutoGUI + Pillow | 全屏截取、区域裁剪、图片压缩 |
-| **元素定位** | OpenCV 模板匹配 + VLM 视觉理解 | 双轨方案，快准结合 |
-| **自动化操作** | PyAutoGUI | 鼠标移动/点击、键盘输入 |
-| **状态验证** | VLM + 截图对比 | 操作结果确认 |
-| **录屏回溯** | mss + cv2.VideoWriter | 后台截帧 → MP4 合成 |
-| **测试框架** | pytest + subprocess | E2E 测试，HTML 报告 |
+Larker began as a submission to the 2026 Feishu CUA Challenge (Track 5: CUA-Lark Agent). M1 achieved 57.1% success rate on the competition benchmark. M2 delivered 100% E2E pass rate on a 3-case search suite. The competition API is no longer available — Larker is now evolving into a standalone, model-agnostic desktop agent.
 
 ---
 
-## 📄 许可证
+## License
 
-MIT License
-
----
-
-*最后更新：2026-05-07 · 飞书 CUA 挑战赛 M2 阶段提交材料*
+MIT

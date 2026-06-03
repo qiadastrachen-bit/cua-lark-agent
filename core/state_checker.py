@@ -23,12 +23,12 @@ import json
 import re
 import time
 import os
+import sys
 from datetime import datetime
 
-# VLM API 配置（复用 step_04 的配置）
-API_KEY = "ark-f11e281e-ef25-4cb0-a1ee-c7d14e8d76d4-7419d"
-ENDPOINT_ID = "ep-20260423222711-8zfcd"
-API_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+# 确保项目根目录在 sys.path 中，以便导入 config
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import API_KEY, ENDPOINT_ID, API_URL
 
 # 状态分析 Prompt
 STATE_ANALYSIS_PROMPT = """你是一个飞书界面分析专家。请仔细分析这张截图，判断当前屏幕状态。

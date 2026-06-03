@@ -13,21 +13,19 @@ import numpy as np
 import os
 import time
 import json
+import re
 import pyautogui
 import base64
 import requests
 import shutil
 from datetime import datetime
 from pathlib import Path
+from config import API_KEY, ENDPOINT_ID, API_URL, PROJECT_ROOT
 
-SCREENSHOT_DIR = Path("D:/feishu-cua-challenge/screenshots")
+SCREENSHOT_DIR = PROJECT_ROOT / "screenshots"
 VERIFY_DIR = SCREENSHOT_DIR / "verify"
-ARCHIVE_DIR = Path("D:/feishu-cua-challenge/archive")
-REPORT_DIR = Path("D:/feishu-cua-challenge/reports")
-
-API_KEY = "ark-f11e281e-ef25-4cb0-a1ee-c7d14e8d76d4-7419d"
-ENDPOINT_ID = "ep-20260423222711-8zfcd"
-API_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+ARCHIVE_DIR = PROJECT_ROOT / "archive"
+REPORT_DIR = PROJECT_ROOT / "reports"
 
 VLM_TIMEOUT = 30
 VLM_RETRIES = 2
@@ -187,6 +185,7 @@ def call_vlm_for_detail_verification(screenshot_path):
 
     payload = {
         "model": ENDPOINT_ID,
+        "response_format": {"type": "json_object"},
         "messages": [
             {
                 "role": "user",
@@ -207,15 +206,31 @@ def call_vlm_for_detail_verification(screenshot_path):
             content = result["choices"][0]["message"]["content"].strip()
             print(f"  📝 VLM返回: {content[:100]}")
 
-            if content.startswith("{") and content.endswith("}"):
+            # 第一层：直接解析（response_format 生效后应为纯 JSON）
+            try:
                 vlm_result = json.loads(content)
+                print(f"  ✅ JSON直接解析成功")
                 return vlm_result
-            else:
-                print(f"  ⚠️ VLM返回格式异常，尝试解析...")
-                if "true" in content.lower() and "detail" in content.lower():
-                    return {"entered_detail": True, "current_page": "可能已进入详情页", "confidence": 0.5}
-                elif "false" in content.lower():
-                    return {"entered_detail": False, "current_page": "可能未进入详情页", "confidence": 0.5}
+            except json.JSONDecodeError:
+                pass  # 继续走正则提取
+
+            # 第二层：正则提取 JSON 块（VLM 在 JSON 前后加了废话）
+            json_match = re.search(r'\{.*?\}', content, re.DOTALL)
+            if json_match:
+                try:
+                    vlm_result = json.loads(json_match.group())
+                    print(f"  ✅ 正则提取JSON成功")
+                    return vlm_result
+                except json.JSONDecodeError:
+                    pass  # JSON 格式仍有问题，继续走兜底逻辑
+
+            # 第三层：关键词匹配（补充中文"是/否"）
+            print(f"  ⚠️ VLM返回格式异常，尝试关键词解析...")
+            content_lower = content.lower()
+            if ("true" in content_lower or "是" in content_lower) and "detail" in content_lower:
+                return {"entered_detail": True, "current_page": "可能已进入详情页", "confidence": 0.5}
+            elif "false" in content_lower or "否" in content_lower:
+                return {"entered_detail": False, "current_page": "可能未进入详情页", "confidence": 0.5}
 
         except requests.exceptions.Timeout:
             wait = 10 * (2 ** (attempt - 1))

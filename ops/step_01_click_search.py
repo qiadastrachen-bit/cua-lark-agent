@@ -3,11 +3,17 @@ import numpy as np
 import pyautogui
 import time
 import os
+import sys
 from datetime import datetime
+from pathlib import Path
 
-# ===== 配置 =====
-TEMPLATE_PATH = "D:\\feishu-cua-challenge\\assets\\template_search_box.png"
-SCREENSHOT_DIR = "D:\\feishu-cua-challenge\\screenshots"
+# 确保能导入项目根目录的 config
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import PROJECT_ROOT, SCREENSHOT_DIR as SCREENSHOT_DIR_PATH
+
+# ===== 配置（使用项目相对路径）=====
+TEMPLATE_PATH = str(PROJECT_ROOT / "assets" / "template_search_box.png")
+SCREENSHOT_DIR = str(SCREENSHOT_DIR_PATH)
 
 # ===== OpenCV 模板匹配（主手段，不调API）=====
 def opencv_match(screenshot_path, template_path, threshold=0.5, max_y_ratio=0.25):

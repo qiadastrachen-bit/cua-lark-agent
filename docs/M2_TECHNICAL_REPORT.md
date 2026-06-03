@@ -407,8 +407,8 @@ feishu-cua-challenge/
 | 配置项 | 值 |
 |--------|-----|
 | API URL | `https://ark.cn-beijing.volces.com/api/v3/chat/completions` |
-| API Key | `ark-f11e281e-ef25-4cb0-a1ee-c7d14e8d76d4-7419d` |
-| Endpoint ID | `ep-20260423222711-8zfcd` |
+| API Key | `$VOLC_API_KEY`（通过 .env 注入） |
+| Endpoint ID | `$VOLC_ENDPOINT_ID`（通过 .env 注入） |
 | Timeout | 30秒（M2优化后） |
 | Max Retries | 2次（M2优化后） |
 
