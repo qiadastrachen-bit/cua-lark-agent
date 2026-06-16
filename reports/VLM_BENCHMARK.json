@@ -1,0 +1,233 @@
+{
+  "generated_at": "2026-06-16T22:57:52.677644",
+  "historical_analysis": {
+    "source": "reports/execution_report_*.md",
+    "run_count": 31,
+    "full_pipeline_pass": 24,
+    "full_pipeline_rate": 77.4,
+    "note": "历史报告仅统计 Step01–04（Step05 归档不计入成功步数）",
+    "runs": [
+      {
+        "file": "execution_report_20260502_230740.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260502_233605.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260503_000456.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260503_091839.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260503_094828.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260503_102629.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260503_110808.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260503_111939.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260503_115949.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260503_131650.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_010851.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_011928.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_021622.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_022119.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_022342.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_022545.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_153054.md",
+        "result": "FAILED",
+        "passed": 3,
+        "total": 4,
+        "full_pass": false
+      },
+      {
+        "file": "execution_report_20260505_160236.md",
+        "result": "FAILED",
+        "passed": 1,
+        "total": 4,
+        "full_pass": false
+      },
+      {
+        "file": "execution_report_20260505_163540.md",
+        "result": "FAILED",
+        "passed": 1,
+        "total": 4,
+        "full_pass": false
+      },
+      {
+        "file": "execution_report_20260505_170446.md",
+        "result": "FAILED",
+        "passed": 1,
+        "total": 4,
+        "full_pass": false
+      },
+      {
+        "file": "execution_report_20260505_172413.md",
+        "result": "FAILED",
+        "passed": 2,
+        "total": 4,
+        "full_pass": false
+      },
+      {
+        "file": "execution_report_20260505_193200.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_193410.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_195602.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_201710.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_202332.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_203537.md",
+        "result": "FAILED",
+        "passed": 3,
+        "total": 4,
+        "full_pass": false
+      },
+      {
+        "file": "execution_report_20260505_223435.md",
+        "result": "FAILED",
+        "passed": 3,
+        "total": 4,
+        "full_pass": false
+      },
+      {
+        "file": "execution_report_20260505_231415.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_232839.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      },
+      {
+        "file": "execution_report_20260505_233423.md",
+        "result": "SUCCESS",
+        "passed": 4,
+        "total": 4,
+        "full_pass": true
+      }
+    ]
+  },
+  "live_benchmark": {
+    "skipped": true,
+    "reason": "未配置 VOLC_API_KEY / VOLC_ENDPOINT_ID（复制 .env.example 为 .env 并填入）"
+  }
+}

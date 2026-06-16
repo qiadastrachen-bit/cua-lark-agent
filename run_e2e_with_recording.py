@@ -32,7 +32,7 @@ import numpy as np
 import mss
 
 # ===== 项目路径 =====
-PROJECT_DIR = Path(r"D:\feishu-cua-challenge")
+PROJECT_DIR = Path(__file__).resolve().parent
 sys.path.append(str(PROJECT_DIR))
 
 VIDEO_DIR = PROJECT_DIR / "videos"
