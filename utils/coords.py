@@ -58,6 +58,9 @@ def screen_coords_to_screenshot(x: int, y: int, screenshot_path: str) -> tuple[i
     shot_size = get_screenshot_size(screenshot_path)
     logical = get_logical_size()
     return scale_point(x, y, logical, shot_size)
+
+
+def screen_info_for_prompt(screenshot_path: str | None = None) -> str:
     lw, lh = get_logical_size()
     if screenshot_path:
         sw, sh = get_screenshot_size(screenshot_path)
