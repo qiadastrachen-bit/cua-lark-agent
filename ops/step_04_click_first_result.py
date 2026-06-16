@@ -24,6 +24,9 @@ import re
 from datetime import datetime
 from PIL import Image  # 用于压缩截图后再发给VLM
 from config import API_KEY, ENDPOINT_ID, API_URL, PROJECT_ROOT, USE_FIXED_COORDS, FIXED_COORDS
+from utils.coords import vlm_coords_to_screen, screen_info_for_prompt, screen_coords_to_screenshot
+from utils.vlm_client import call_vlm as vlm_request
+from utils.vlm_client import call_vlm_multi_image
 
 # SCREENSHOT_DIR 统一使用项目相对路径
 SCREENSHOT_DIR = str(PROJECT_ROOT / "screenshots")
@@ -58,7 +61,7 @@ SIMPLE_LOCATE_PROMPT = """你是一个飞书GUI坐标定位专家。任务：返
 - 不要点在空白处
 - 不要点在"展开更多"、"在云文档中搜索更多"等辅助文字上
 
-屏幕分辨率：2560x1600（2K屏）
+屏幕分辨率：{screen_info}
 
 **只返回坐标**，格式：x=数字,y=数字
 例如：x=960,y=350"""
@@ -91,73 +94,8 @@ MARGIN = 50
 
 
 def call_vlm(image_path, prompt, max_retries=MAX_VLM_RETRIES, timeout=VLM_TIMEOUT):
-    """调用 VLM 分析截图，返回原始文本（含指数退避）"""
-    # 先压缩图片，避免大图导致超时
-    try:
-        img = Image.open(image_path)
-        # 等比例缩放到最大 1280x800，减少上传和处理时间
-        img.thumbnail((1280, 800), Image.LANCZOS)
-        import io
-        buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=True)
-        img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-        print(f"  📐 图片已压缩: {os.path.getsize(image_path)//1024}KB → {len(img_base64)*3//4//1024}KB")
-    except Exception as e:
-        print(f"  ⚠️ 图片压缩失败，使用原图: {e}")
-        with open(image_path, "rb") as f:
-            img_base64 = base64.b64encode(f.read()).decode("utf-8")
-
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {API_KEY}"
-    }
-
-    payload = {
-        "model": ENDPOINT_ID,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
-                ]
-            }
-        ]
-    }
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            print(f"  🤖 VLM 调用中... (第 {attempt} 次, timeout={timeout}s)")
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=timeout)
-            response.raise_for_status()
-            result = response.json()
-            content = result["choices"][0]["message"]["content"]
-            print(f"  📝 VLM 返回: {content.strip()[:120]}")
-            return content.strip()
-        except requests.exceptions.Timeout:
-            wait = VLM_RETRY_BASE_DELAY * (2 ** (attempt - 1))
-            print(f"  ⚠️ VLM 超时 (>{timeout}s)，等待 {wait}s 后重试...")
-            if attempt < max_retries:
-                time.sleep(wait)
-        except requests.exceptions.HTTPError as e:
-            if response.status_code == 429:
-                # 429 限流：等待较长时间让配额恢复，但不无限重试
-                wait = 90 + attempt * 45  # 135s, 180s (约2-3分钟)
-                print(f"  ⚠️ TPM 限流 (429)，等待 {wait}s 让配额恢复...")
-                if attempt < max_retries:
-                    time.sleep(wait)
-            else:
-                print(f"  ❌ HTTP 错误: {e}")
-                if attempt < max_retries:
-                    time.sleep(VLM_RETRY_BASE_DELAY)
-        except Exception as e:
-            wait = VLM_RETRY_BASE_DELAY * attempt
-            print(f"  ❌ 调用失败: {e}，{wait}s 后重试...")
-            if attempt < max_retries:
-                time.sleep(wait)
-
-    print("  ❌ VLM 所有重试均失败")
-    return None
+    """Wrapper: image-first arg order for this module."""
+    return vlm_request(prompt, image_path, max_retries=max_retries, timeout=timeout)
 
 
 def parse_vlm_coordinates(vlm_output):
@@ -249,7 +187,7 @@ def check_mouse_unchanged(x, y, tolerance=20, wait_sec=0.5):
     return dist < tolerance
 
 
-def click_first_result(enable_visualizer=True, use_opencv_refine=False):
+def click_first_result(enable_visualizer=True, use_opencv_refine=False, search_term: str | None = None):
     """点击第一条搜索结果（简化版：只调1次VLM定位）"""
     result = {
         "success": False,
@@ -292,56 +230,54 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
 
     if USE_FIXED_COORDS:
         print(f"🔧 使用固定坐标模式（绕过VLM）: {FIXED_COORDS}")
-        print("⏳ 跳过预热等待，直接使用固定坐标...")
         before_path = os.path.join(SCREENSHOT_DIR, f"step04_before_{timestamp}_fixed.png")
         pyautogui.screenshot(before_path)
-        print(f"📸 操作前截图已保存: {before_path}")
         coords = FIXED_COORDS
     else:
-        # 预热等待：给TPM配额足够恢复时间
         print("⏳ 预热等待 30s，让VLM配额恢复...")
         time.sleep(30)
 
-    for locate_attempt in range(1, MAX_LOCATE_RETRIES + 1):
-        print(f"\n🔍 [阶段1] VLM 定位搜索结果 (尝试 {locate_attempt}/{MAX_LOCATE_RETRIES})...")
-        before_path = os.path.join(SCREENSHOT_DIR, f"step04_before_{timestamp}_attempt{locate_attempt}.png")
-        pyautogui.screenshot(before_path)
-        print(f"📸 [阶段1] 操作前截图已保存: {before_path}")
+        for locate_attempt in range(1, MAX_LOCATE_RETRIES + 1):
+            print(f"\n🔍 [阶段1] VLM 定位搜索结果 (尝试 {locate_attempt}/{MAX_LOCATE_RETRIES})...")
+            before_path = os.path.join(SCREENSHOT_DIR, f"step04_before_{timestamp}_attempt{locate_attempt}.png")
+            pyautogui.screenshot(before_path)
+            prompt = SIMPLE_LOCATE_PROMPT.replace("{screen_info}", screen_info_for_prompt(before_path))
+            if search_term:
+                prompt += f"\n\n优先点击名称包含「{search_term}」的【联系人】条目（有头像的人名行），不要点云文档或其他类型。"
+            print("  🎯 VLM 直接定位第一条结果...")
+            vlm_output = call_vlm(before_path, prompt, timeout=VLM_TIMEOUT)
 
-        print("  🎯 VLM 直接定位第一条结果...")
-        vlm_output = call_vlm(before_path, SIMPLE_LOCATE_PROMPT, timeout=VLM_TIMEOUT)
+            if not vlm_output:
+                print(f"  ❌ 第 {locate_attempt} 次定位失败，重试...")
+                time.sleep(2)
+                continue
 
-        if not vlm_output:
-            print(f"  ❌ 第 {locate_attempt} 次定位失败，重试...")
-            time.sleep(2)
-            continue
+            raw = parse_vlm_coordinates(vlm_output)
+            if not raw:
+                print(f"  ❌ 第 {locate_attempt} 次坐标解析失败: {vlm_output}，重试...")
+                time.sleep(2)
+                continue
 
-        current_coords = parse_vlm_coordinates(vlm_output)
-        if not current_coords:
-            print(f"  ❌ 第 {locate_attempt} 次坐标解析失败: {vlm_output}，重试...")
-            time.sleep(2)
-            continue
+            current_coords = vlm_coords_to_screen(raw[0], raw[1], before_path)
+            x, y = current_coords
+            print(f"  🎯 VLM 返回坐标 (scaled): ({x}, {y})")
 
-        x, y = current_coords
-        print(f"  🎯 VLM 返回坐标: ({x}, {y})")
+            val_result = validate_coordinates(x, y)
+            if val_result is True:
+                coords = current_coords
+                print("  ✅ 坐标校验通过")
+                break
+            elif isinstance(val_result, tuple) and len(val_result) == 3:
+                coords = (val_result[1], val_result[2])
+                print("  ✅ 坐标校验通过（已自动修正）")
+                break
+            else:
+                print("  ❌ 坐标未通过校验，重试...")
+                time.sleep(2)
 
-        val_result = validate_coordinates(x, y)
-        if val_result is True:
-            coords = current_coords
-            print(f"  ✅ 坐标校验通过")
-            break
-        elif isinstance(val_result, tuple) and len(val_result) == 3:
-            # 过渡区自动修正后的坐标
-            coords = (val_result[1], val_result[2])
-            print(f"  ✅ 坐标校验通过（已自动修正）")
-            break
-        else:
-            print(f"  ❌ 坐标未通过校验，重试...")
-            time.sleep(2)
-
-    if not coords:
+    if not coords and not USE_FIXED_COORDS:
         print("\n⚠️ VLM 定位全部失败，启用 OpenCV 模板匹配兜底...")
-        template_path = "D:\\feishu-cua-challenge\\assets\\search_result_first_item.png"
+        template_path = str(PROJECT_ROOT / "assets" / "search_result_first_item.png")
         if os.path.exists(template_path):
             match = opencv_match_template(before_path, template_path)
             if match:
@@ -361,8 +297,13 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
         return result
 
     x, y = coords
-    x, y = adjust_if_transition_zone(x, y)
     print(f"  🎯 最终定位: ({x}, {y})")
+
+    marked_path = draw_crosshair_on_image(
+        before_path, *screen_coords_to_screenshot(x, y, before_path)
+    )
+    if marked_path:
+        print(f"  📍 定位标记图: {marked_path}")
 
     # ====== 录屏提醒（使用 Windows 录屏）======
     # 请在运行脚本前按 Win+Alt+R 开始录屏，运行结束后按 Win+Alt+R 停止
@@ -390,45 +331,29 @@ def click_first_result(enable_visualizer=True, use_opencv_refine=False):
     print(f"  📸 [阶段4] 操作后截图已保存: {after_path}")
 
     print("  🔍 [阶段4] VLM 验证点击结果...")
-
+    verify_ok = True
     try:
-        with open(before_path, "rb") as f1:
-            before_b64 = base64.b64encode(f1.read()).decode("utf-8")
-        with open(after_path, "rb") as f2:
-            after_b64 = base64.b64encode(f2.read()).decode("utf-8")
-
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {API_KEY}"
-        }
-        payload = {
-            "model": ENDPOINT_ID,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": VERIFY_PROMPT},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{before_b64}"}},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{after_b64}"}}
-                    ]
-                }
-            ]
-        }
-
-        response = requests.post(API_URL, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        verify_result = response.json()["choices"][0]["message"]["content"].strip()
-        print(f"  📝 VLM 验证: {verify_result[:80]}")
-
-        if "SUCCESS" in verify_result.upper():
-            print("  ✅ [阶段4] 验证通过：点击成功打开目标页面 ✓")
+        verify_result = call_vlm_multi_image(VERIFY_PROMPT, [before_path, after_path], timeout=30, max_retries=1)
+        if verify_result:
+            print(f"  📝 VLM 验证: {verify_result[:80]}")
+            if "SUCCESS" in verify_result.upper():
+                print("  ✅ [阶段4] 验证通过：点击成功打开目标页面 ✓")
+            else:
+                verify_ok = False
+                print(f"  ❌ [阶段4] 验证失败：{verify_result}")
         else:
-            print(f"  ⚠️ [阶段4] 验证存疑：{verify_result}")
+            print("  ⚠️ [阶段4] 验证调用无返回（不阻断，但坐标可能不准）")
     except Exception as e:
-        print(f"  ⚠️ [阶段4] 验证调用失败: {e}（不影响主流程）")
+        print(f"  ⚠️ [阶段4] 验证调用失败: {e}（不阻断）")
 
     if visualizer:
         visualizer.stop()
+
+    if not verify_ok:
+        result["message"] = "点击后页面验证失败（可能点偏或未进入目标）"
+        result["screenshot"] = str(after_path)
+        print("\n❌ Step 04 失败：VLM 验证未通过")
+        return result
 
     print("\n✅ Step 04 完成：定位→点击→验证")
     result["success"] = True

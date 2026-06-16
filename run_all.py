@@ -3,142 +3,199 @@ import os
 import json
 import time
 import argparse
-import signal
 import threading
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+from config import STEP_DELAY_SEC, CASE_DELAY_SEC, STRICT_STATE_CHECK
+from core.state_checker import gate_step
+from core.task_parser import parse_instruction
 from ops.step_01_click_search import click_search_box
-from ops.step_02_input_text import input_search_text, activate_feishu_window
+from ops.step_02_input_text import input_search_text
 from ops.step_03_wait_search_results import wait_search_results
 from ops.step_04_click_first_result import click_first_result
 from ops.step_05_verify_and_archive import verify_and_archive
+from ops.step_06_send_message import send_chat_message
 
 
 def retry_step(step_func, *args, max_retries=2, step_timeout=600, **kwargs):
-    """
-    单步重试包装器：
-    - 如果某一步返回 success=False，自动整步重试
-    - max_retries=2 表示：首次 + 最多重试2次 = 共3次机会
-    - 每次重试前等待 5 * 重试次数 秒（5s, 10s）
-    - step_timeout: 单步超时（默认600秒=10分钟），超时强制返回失败
-    - 任意一次成功就立即返回成功结果
-    - 全部失败则返回最后一次的结果（无论成功/失败）
-    """
-    import time
-
-    def _run_with_timeout():
-        nonlocal result
-        result = step_func(*args, **kwargs)
-
-    result = {"success": False, "message": "超时未完成"}
-    for attempt in range(max_retries + 1):   # 0, 1, 2
+    result = {"success": False, "message": "timeout"}
+    for attempt in range(max_retries + 1):
         if attempt > 0:
             wait_sec = 5 * attempt
-            print(f"  🔄 重试 {step_func.__name__} (第 {attempt}/{max_retries} 次，等待 {wait_sec}s)...")
+            print(f"  retry {step_func.__name__} ({attempt}/{max_retries}, wait {wait_sec}s)...")
             time.sleep(wait_sec)
         else:
-            print(f"  ▶️  执行 {step_func.__name__}... (超时: {step_timeout}s)")
+            print(f"  run {step_func.__name__}... (timeout {step_timeout}s)")
 
-        result = {"success": False, "message": "超时未完成"}
-        timer = threading.Timer(step_timeout, lambda: None)  # 简化：依赖内部VLM超时
-        timer.start()
         try:
             result = step_func(*args, **kwargs)
         except Exception as e:
-            result = {"success": False, "message": f"异常: {str(e)}"}
-        finally:
-            timer.cancel()
+            result = {"success": False, "message": f"exception: {e}"}
 
         if result.get("success"):
             if attempt > 0:
-                print(f"  ✅ {step_func.__name__} 重试成功！(第 {attempt} 次)")
+                print(f"  OK {step_func.__name__} recovered on retry {attempt}")
             return result
-        else:
-            msg = result.get("message", "未知错误")
-            print(f"  ❌ {step_func.__name__} 失败: {msg}")
+        print(f"  FAIL {step_func.__name__}: {result.get('message', '')}")
 
-    print(f"  ❌ {step_func.__name__} 所有重试均失败")
+    print(f"  FAIL {step_func.__name__}: all retries exhausted")
     return result
 
 
-def run_test_case(search_term):
+def _append_step(step_results, name, result, elapsed_sec, extra=None):
+    entry = {
+        "name": name,
+        "success": result.get("success", False),
+        "message": result.get("message", ""),
+        "screenshot": result.get("screenshot"),
+        "screenshots": result.get("screenshots", []),
+        "elapsed_sec": round(elapsed_sec, 2),
+    }
+    if extra:
+        entry.update(extra)
+    step_results.append(entry)
+    return entry
+
+
+def _state_gate(step_results, screenshot, expected, label):
+    ok, msg, info = gate_step(screenshot, expected, label, strict=STRICT_STATE_CHECK)
+    if msg:
+        print(f"  {msg}")
+    if step_results and info:
+        step_results[-1]["state_check"] = info
+        if not ok:
+            step_results[-1]["success"] = False
+            step_results[-1]["message"] += f" | {msg}"
+    return ok
+
+
+def run_test_case(search_term, case_meta=None, message_text=None):
     step_results = []
+    case_meta = case_meta or {}
+    run_started = time.time()
 
-    print("=== Step 01: 点击搜索框 ===")
+    t0 = time.time()
+    print("=== Step 01: click search box ===")
     result = retry_step(click_search_box)
-    step_results.append({
-        "name": "Step01 点击搜索框",
-        "success": result["success"],
-        "message": result.get("message", ""),
-        "screenshot": result.get("screenshot")
-    })
-    time.sleep(30)  # 给VLM配额恢复时间
+    _append_step(step_results, "Step01 click search", result, time.time() - t0, {"locate_method": result.get("locate_method")})
+    if result.get("success"):
+        _state_gate(step_results, result.get("screenshot"), ["search_box_active", "searching", "search_results"], "after Step01")
+    if not step_results[-1]["success"]:
+        verify_and_archive(step_results, case_meta=case_meta, total_elapsed=time.time() - run_started)
+        return step_results
+    time.sleep(STEP_DELAY_SEC)
 
-    print("=== Step 02: 输入搜索词 ===")
+    t0 = time.time()
+    print("=== Step 02: input search term ===")
     result = retry_step(input_search_text, search_term)
-    step_results.append({
-        "name": "Step02 输入搜索词",
-        "success": result["success"],
-        "message": result.get("message", ""),
-        "screenshot": result.get("screenshot")
-    })
-    time.sleep(30)
+    _append_step(step_results, "Step02 input text", result, time.time() - t0)
+    time.sleep(STEP_DELAY_SEC)
 
-    print("=== Step 03: 等待结果 ===")
+    t0 = time.time()
+    print("=== Step 03: wait for results ===")
     result = retry_step(wait_search_results, wait_seconds=5, enable_visualizer=True)
-    step_results.append({
-        "name": "Step03 等待搜索结果",
-        "success": result["success"],
-        "message": result.get("message", ""),
-        "screenshot": result.get("screenshot")
-    })
-    time.sleep(30)
+    _append_step(step_results, "Step03 wait results", result, time.time() - t0)
+    if result.get("success"):
+        shot = result.get("screenshot") or (result.get("screenshots") or [None])[-1]
+        _state_gate(step_results, shot, ["search_results", "searching"], "after Step03")
+    if not step_results[-1]["success"]:
+        verify_and_archive(step_results, case_meta=case_meta, total_elapsed=time.time() - run_started)
+        return step_results
+    time.sleep(STEP_DELAY_SEC)
 
-    print("=== Step 04: 点击第一条结果 ===")
-    # use_opencv_refine=True: VLM 定位后 OpenCV 精定位（双轨定位完整版）
-    # 设为 False 可跳过 OpenCV 精定位（调试/纯 VLM 对比时用）
-    result = retry_step(click_first_result, enable_visualizer=True, use_opencv_refine=True)
-    step_results.append({
-        "name": "Step04 点击第一条结果",
-        "success": result["success"],
-        "message": result.get("message", ""),
-        "screenshot": result.get("screenshot")
-    })
-    time.sleep(30)
+    t0 = time.time()
+    print("=== Step 04: click first result ===")
+    result = retry_step(click_first_result, enable_visualizer=True, use_opencv_refine=True, search_term=search_term)
+    _append_step(step_results, "Step04 click result", result, time.time() - t0)
+    if result.get("success"):
+        _state_gate(
+            step_results,
+            result.get("screenshot"),
+            ["chat_window", "doc_editing", "calendar_view", "feishu_main"],
+            "after Step04",
+        )
+    if not step_results[-1]["success"]:
+        verify_and_archive(step_results, case_meta=case_meta, total_elapsed=time.time() - run_started)
+        return step_results
+    time.sleep(STEP_DELAY_SEC)
 
-    print("=== Step 05: 验证归档 ===")
-    verify_and_archive(step_results)
+    if message_text:
+        t0 = time.time()
+        print("=== Step 06: send chat message ===")
+        result = retry_step(send_chat_message, message_text)
+        _append_step(step_results, "Step06 send message", result, time.time() - t0)
+        if result.get("success"):
+            _state_gate(step_results, result.get("screenshot"), ["chat_window"], "after Step06")
+        if not step_results[-1]["success"]:
+            verify_and_archive(step_results, case_meta=case_meta, total_elapsed=time.time() - run_started)
+            return step_results
+        time.sleep(STEP_DELAY_SEC)
 
-    print("\n=== 执行汇总 ===")
+    t0 = time.time()
+    print("=== Step 05: verify and archive ===")
+    archive_result = verify_and_archive(
+        step_results,
+        case_meta=case_meta,
+        total_elapsed=time.time() - run_started,
+    )
+    step05 = {
+        "success": archive_result.get("success", False),
+        "message": archive_result.get("message", "archive done"),
+        "screenshot": None,
+        "screenshots": [],
+        "archive_path": archive_result.get("archive_path"),
+        "execution_report": archive_result.get("execution_report"),
+    }
+    _append_step(step_results, "Step05 verify archive", step05, time.time() - t0)
+
+    print("\n=== summary ===")
     for r in step_results:
-        status = "✅" if r["success"] else "❌"
-        print(f"{status} {r['name']}: {r.get('message', '')}")
+        status = "OK" if r["success"] else "FAIL"
+        print(f"  [{status}] {r['name']} ({r.get('elapsed_sec', 0)}s): {r.get('message', '')}")
 
+    passed = sum(1 for r in step_results if r["success"])
+    print(f"\nTotal: {passed}/{len(step_results)} steps passed in {time.time() - run_started:.1f}s")
     return step_results
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="飞书 CUA 多步操作串联")
-    parser.add_argument("--search-term", type=str, default="测试", help="搜索词")
-    parser.add_argument("--run-all", action="store_true", help="运行所有测试用例")
+    parser = argparse.ArgumentParser(description="Feishu CUA pipeline")
+    parser.add_argument("--search-term", type=str, help="Search keyword")
+    parser.add_argument("--message", type=str, help="Message to send after opening chat (Step06)")
+    parser.add_argument("--instruction", type=str, help="Natural language test instruction")
+    parser.add_argument("--run-all", action="store_true", help="Run all cases in test_cases.json")
     args = parser.parse_args()
+
+    message_text = None
+
+    if args.instruction:
+        task = parse_instruction(args.instruction)
+        search_term = task["search_term"]
+        message_text = task.get("message_text") or args.message
+        print(
+            f"Parsed instruction ({task['source']}): flow={task['flow']}, "
+            f"term={search_term}, message={message_text or '(none)'}"
+        )
+    elif args.search_term:
+        search_term = args.search_term
+        message_text = args.message
+    else:
+        search_term = "测试"
+        message_text = args.message
 
     if args.run_all:
         with open("test_cases.json", encoding="utf-8") as f:
             cases = json.load(f)
-        all_results = []
         for case in cases:
-            print(f"\n{'='*50}")
-            print(f"运行用例: {case['id']} - {case['name']}")
-            step_results = run_test_case(case["search_term"])
-            all_results.append({"case": case, "results": step_results})
-            time.sleep(90)  # 用例间长延迟，让TPM配额充分恢复
-
-        print(f"\n{'='*50}")
-        print("=== 全部用例执行完毕 ===")
-        for r in all_results:
-            success_count = sum(1 for s in r["results"] if s["success"])
-            print(f"{r['case']['id']} {r['case']['name']}: {success_count}/{len(r['results'])} 步成功")
+            print(f"\n{'='*50}\nCase {case['id']}: {case['name']}\n{'='*50}")
+            term = case["search_term"]
+            msg = case.get("message_text")
+            if case.get("instruction"):
+                parsed = parse_instruction(case["instruction"])
+                term = parsed["search_term"]
+                msg = parsed.get("message_text") or msg
+            run_test_case(term, case_meta=case, message_text=msg)
+            time.sleep(CASE_DELAY_SEC)
     else:
-        run_test_case(args.search_term)
+        run_test_case(search_term, message_text=message_text)

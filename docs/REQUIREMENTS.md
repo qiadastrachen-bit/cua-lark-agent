@@ -68,8 +68,8 @@
 | FR-12 | 过渡区坐标修正 | ✅ Step04 y+35px 规则 |
 | FR-13 | 鼠标轨迹可视化 | ✅ `mouse_visualizer.py` |
 | FR-14 | Overlay 状态面板 | ❌ 已搁置（Chrome 方案不稳定） |
-| FR-15 | 通用状态感知 | ⚠️ `state_checker.py` 已实现，未接入主流程 |
-| FR-16 | 自然语言任务入口 | ❌ 未实现 |
+| FR-15 | 通用状态感知 | ✅ `state_checker` 已接入 `run_all`（Step01/03/04 后） |
+| FR-16 | 自然语言任务入口 | ✅ `--instruction` + `core/task_parser.py` |
 | FR-17 | 用户接管/暂停 | ❌ 未实现 |
 
 ### 3.3 未来规划（M3+）

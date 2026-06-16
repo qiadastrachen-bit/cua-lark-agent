@@ -1,8 +1,9 @@
 pyautogui>=0.9.54
 requests>=2.31.0
 Pillow>=10.0.0
-opencv-python>=4.8.0
-numpy>=1.24.0
+opencv-python>=4.8.0,<4.13
+# 锁定 numpy 1.x，避免 pip 拉取 2.4.x 时镜像/哈希校验失败（与已安装的 1.26.4 兼容）
+numpy>=1.24.0,<2.0.0
 pyperclip>=1.8.2
 PyGetWindow>=0.0.9
 pytest>=7.0.0

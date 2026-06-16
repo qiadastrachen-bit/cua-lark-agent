@@ -1,57 +1,89 @@
 import cv2
-import numpy as np
 import pyautogui
 import time
 import os
 import sys
+import re
 from datetime import datetime
-from pathlib import Path
 
-# 确保能导入项目根目录的 config
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import PROJECT_ROOT, SCREENSHOT_DIR as SCREENSHOT_DIR_PATH
+from utils.vlm_client import call_vlm
+from utils.coords import vlm_coords_to_screen, screen_info_for_prompt
 
-# ===== 配置（使用项目相对路径）=====
 TEMPLATE_PATH = str(PROJECT_ROOT / "assets" / "template_search_box.png")
 SCREENSHOT_DIR = str(SCREENSHOT_DIR_PATH)
 
-# ===== OpenCV 模板匹配（主手段，不调API）=====
+SEARCH_BOX_LOCATE_PROMPT = """你是飞书 GUI 定位专家。返回顶部【全局搜索框】可点击区域中心坐标。
+搜索框通常在窗口最上方，有放大镜图标或「搜索」占位文字。
+{screen_info}
+只返回: x=数字,y=数字
+"""
+
+
 def opencv_match(screenshot_path, template_path, threshold=0.5, max_y_ratio=0.25):
     screenshot = cv2.imread(screenshot_path)
     template = cv2.imread(template_path)
-    
+    if screenshot is None or template is None:
+        return None
+
     result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-    
+
     h, w = template.shape[:2]
     center_x = max_loc[0] + w // 2
     center_y = max_loc[1] + h // 2
     screen_h = screenshot.shape[0]
-    
-    print(f"  OpenCV 最佳匹配度: {max_val:.3f}")
-    
+
+    print(f"  OpenCV best match: {max_val:.3f}")
+
     if max_val >= threshold and center_y < screen_h * max_y_ratio:
         return center_x, center_y, max_val
     return None
 
-# ===== 主流程 =====
+
+def parse_vlm_coordinates(vlm_output):
+    if not vlm_output:
+        return None
+    for pat in (
+        r"x\s*=\s*(\d+)\s*,\s*y\s*=\s*(\d+)",
+        r"\(\s*(\d+)\s*,\s*(\d+)\s*\)",
+        r"(\d{2,4})\s*,\s*(\d{2,4})",
+    ):
+        m = re.search(pat, vlm_output)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def vlm_locate_search_box(screenshot_path):
+    prompt = SEARCH_BOX_LOCATE_PROMPT.format(screen_info=screen_info_for_prompt(screenshot_path))
+    print("  OpenCV failed, trying VLM for search box...")
+    out = call_vlm(prompt, screenshot_path, timeout=45, max_retries=2)
+    coords = parse_vlm_coordinates(out)
+    if not coords:
+        return None
+    x, y = vlm_coords_to_screen(coords[0], coords[1], screenshot_path)
+    print(f"  VLM search box: ({x}, {y})")
+    return x, y
+
+
 def click_search_box():
-    """点击飞书搜索框，返回标准执行结果"""
     result = {
         "success": False,
         "screenshot": "",
         "message": "",
-        "screenshots": []
+        "screenshots": [],
+        "locate_method": "",
     }
-    # 1. 检查模板文件
+
     if not os.path.exists(TEMPLATE_PATH):
-        msg = f"错误：找不到模板文件 {TEMPLATE_PATH}，请先截取搜索框图片保存为 assets/template_search_box.png"
+        msg = f"Missing template: {TEMPLATE_PATH}"
         result["message"] = msg
         print(msg)
         return result
-    
-    # 2. 激活飞书窗口
-    print("步骤1: 激活飞书窗口...")
+
+    print("Step1: activate Feishu window...")
     try:
         import pygetwindow as gw
         wins = gw.getWindowsWithTitle("飞书") or gw.getWindowsWithTitle("Lark")
@@ -61,50 +93,41 @@ def click_search_box():
                 win.restore()
             win.activate()
             time.sleep(1)
-            print("  飞书窗口已激活")
     except Exception as e:
-        print(f"  窗口激活失败: {e}，继续执行")
-    
-    # 3. 截取全屏
+        print(f"  window activate warning: {e}")
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
     before_path = os.path.join(SCREENSHOT_DIR, f"step01_before_{timestamp}.png")
     pyautogui.screenshot(before_path)
-    result["screenshots"].append(str(before_path))
-    print(f"步骤2: 已保存截图 {before_path}")
-    
-    # 4. OpenCV 模板匹配（主手段，不调API）
-    print("步骤3: OpenCV 模板匹配...")
+    result["screenshots"].append(before_path)
+
     match = opencv_match(before_path, TEMPLATE_PATH)
-    
     if match:
         x, y, conf = match
-        print(f"  ✓ 匹配成功! 坐标: ({x}, {y}), 置信度: {conf:.3f}")
+        result["locate_method"] = f"opencv({conf:.3f})"
     else:
-        msg = "OpenCV 匹配失败，检查模板图是否正确，或尝试调低阈值"
-        result["message"] = msg
-        print(f"  ✗ {msg}")
-        return result
-    
-    # 5. 点击
-    print(f"步骤4: 移动到 ({x}, {y}) 并点击...")
-    pyautogui.FAILSAFE = False  # 禁用 fail-safe（比赛场景下有 VLM 确认保障安全）
+        vlm_xy = vlm_locate_search_box(before_path)
+        if not vlm_xy:
+            result["message"] = "OpenCV and VLM both failed to locate search box"
+            return result
+        x, y = vlm_xy
+        result["locate_method"] = "vlm"
+
+    pyautogui.FAILSAFE = False
     pyautogui.moveTo(x, y, duration=1)
-    time.sleep(1)
+    time.sleep(0.5)
     pyautogui.click()
-    time.sleep(2)
-    
-    # 6. 截取操作后截图
+    time.sleep(1.5)
+
     after_path = os.path.join(SCREENSHOT_DIR, f"step01_after_{timestamp}.png")
     pyautogui.screenshot(after_path)
-    result["screenshots"].append(str(after_path))
-    result["screenshot"] = str(after_path)
-    print(f"步骤5: 已保存操作后截图 {after_path}")
-    
+    result["screenshots"].append(after_path)
+    result["screenshot"] = after_path
     result["success"] = True
-    result["message"] = "搜索框点击成功"
-    print("✓ 完成! 搜索框已激活")
+    result["message"] = f"Search box clicked ({result['locate_method']})"
     return result
+
 
 if __name__ == "__main__":
     click_search_box()

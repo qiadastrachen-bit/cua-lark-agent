@@ -62,15 +62,16 @@ def parse_historical_reports() -> dict:
 
 def run_live_benchmark(case_limit: int | None = None) -> dict:
     """Live 运行：调用 run_all 流程，记录每步结果。"""
-    from config import API_KEY, ENDPOINT_ID, USE_FIXED_COORDS
+    from config import vlm_configured, vlm_config_summary, USE_FIXED_COORDS
     from run_all import run_test_case
 
     if USE_FIXED_COORDS:
         raise RuntimeError("USE_FIXED_COORDS 应为 false")
-    if not API_KEY or not ENDPOINT_ID:
+    if not vlm_configured(for_vision=True):
         return {
             "skipped": True,
-            "reason": "未配置 VOLC_API_KEY / VOLC_ENDPOINT_ID（复制 .env.example 为 .env 并填入）",
+            "reason": "视觉 API 未配置。hybrid 模式需 VOLC_API_KEY + VOLC_ENDPOINT_ID；"
+                      "或设 VLM_PROVIDER=volc",
         }
 
     cases = json.loads(TEST_CASES_PATH.read_text(encoding="utf-8"))

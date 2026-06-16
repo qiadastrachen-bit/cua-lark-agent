@@ -1,0 +1,86 @@
+{
+  "timestamp": "2026-06-17T00:46:57.211074",
+  "test_case": "manual",
+  "test_case_name": "",
+  "search_term": "",
+  "total_elapsed_sec": 202.14,
+  "steps": [
+    {
+      "step": 1,
+      "name": "Step01 click search",
+      "success": true,
+      "message": "Search box clicked (opencv(1.000))",
+      "elapsed_sec": 5.3,
+      "screenshots": [
+        "D:\\feishu-cua-challenge\\screenshots\\step01_before_20260617_004335.png",
+        "D:\\feishu-cua-challenge\\screenshots\\step01_after_20260617_004335.png"
+      ],
+      "state_check": null
+    },
+    {
+      "step": 2,
+      "name": "Step02 input text",
+      "success": true,
+      "message": "搜索词「陈锦彤」输入成功",
+      "elapsed_sec": 4.32,
+      "screenshots": [
+        "D:\\feishu-cua-challenge\\screenshots\\step02_after_input_20260617_004415.png"
+      ],
+      "state_check": null
+    },
+    {
+      "step": 3,
+      "name": "Step03 wait results",
+      "success": true,
+      "message": "等待搜索结果完成",
+      "elapsed_sec": 5.48,
+      "screenshots": [],
+      "state_check": {
+        "state": "search_results",
+        "description": "全局搜索框已输入内容'陈锦彤'，下方列出了搜索结果（联系人、云文档等），处于搜索结果展示状态。",
+        "can_proceed": true,
+        "next_action": "click_search_result",
+        "confidence": 0.95,
+        "screenshot": "D:\\feishu-cua-challenge\\screenshots\\step03_wait_20260617_004450.png"
+      }
+    },
+    {
+      "step": 4,
+      "name": "Step04 click result",
+      "success": true,
+      "message": "点击第一条搜索结果成功",
+      "elapsed_sec": 60.48,
+      "screenshots": [],
+      "state_check": {
+        "state": "chat_window",
+        "description": "当前界面显示飞书的消息聊天窗口，正在与用户陈锦彤进行对话，包含聊天记录和文档分享。",
+        "can_proceed": true,
+        "next_action": "send_message",
+        "confidence": 0.95,
+        "screenshot": "D:\\feishu-cua-challenge\\screenshots\\step04_after_20260617_004524.png"
+      }
+    }
+  ],
+  "overall": {
+    "success": true,
+    "passed": 4,
+    "failed": 0,
+    "total": 4
+  },
+  "screenshots": [
+    "D:\\feishu-cua-challenge\\screenshots\\step01_before_20260617_004335.png",
+    "D:\\feishu-cua-challenge\\screenshots\\step01_after_20260617_004335.png",
+    "D:\\feishu-cua-challenge\\screenshots\\step02_after_input_20260617_004415.png"
+  ],
+  "verification": [
+    {
+      "step": "Step01",
+      "before": "D:\\feishu-cua-challenge\\screenshots\\step01_before_20260617_004335.png",
+      "after": "D:\\feishu-cua-challenge\\screenshots\\step01_after_20260617_004335.png",
+      "similarity": 0.0457,
+      "change_detected": true
+    }
+  ],
+  "vlm_detail_check": null,
+  "failure_scene": null
+}

@@ -1,0 +1,15 @@
+# 最小依赖：不重装 numpy/opencv（避免大文件下载失败）
+# 若全新环境，用 requirements.txt
+
+pyautogui>=0.9.54
+requests>=2.31.0
+Pillow>=10.0.0
+pyperclip>=1.8.2
+PyGetWindow>=0.0.9
+pytest>=7.0.0
+mss>=9.0.0
+python-dotenv>=1.0.0
+
+# 以下若已安装可忽略；全新机器再装：
+# opencv-python>=4.8.0
+# numpy>=1.24.0,<2.0.0

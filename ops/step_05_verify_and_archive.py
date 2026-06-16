@@ -20,7 +20,8 @@ import requests
 import shutil
 from datetime import datetime
 from pathlib import Path
-from config import API_KEY, ENDPOINT_ID, API_URL, PROJECT_ROOT
+from config import PROJECT_ROOT
+from utils.vlm_client import call_vlm_json
 
 SCREENSHOT_DIR = PROJECT_ROOT / "screenshots"
 VERIFY_DIR = SCREENSHOT_DIR / "verify"
@@ -160,87 +161,18 @@ def call_vlm_for_detail_verification(screenshot_path):
 - 可能看到：文档正文、内容编辑区、消息详情等
 - 不是详情页的特征：仍然是搜索结果下拉列表、悬浮面板
 
-返回格式（严格JSON）：
+返回 JSON 格式：
 {"entered_detail": true/false, "current_page": "页面描述", "confidence": 0.0-1.0}
-
-只返回JSON，不要其他内容。"""
-
-    try:
-        from PIL import Image
-        img = Image.open(screenshot_path)
-        img.thumbnail((1280, 800), Image.LANCZOS)
-        import io
-        buf = io.BytesIO()
-        img.save(buf, format="PNG", optimize=True)
-        img_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-    except Exception as e:
-        print(f"  ⚠️ 图片压缩失败: {e}")
-        with open(screenshot_path, "rb") as f:
-            img_base64 = base64.b64encode(f.read()).decode("utf-8")
-
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {API_KEY}"
-    }
-
-    payload = {
-        "model": ENDPOINT_ID,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
-                ]
-            }
-        ]
-    }
+"""
 
     for attempt in range(1, VLM_RETRIES + 1):
-        try:
-            print(f"  📤 VLM请求中... (第{attempt}次)")
-            response = requests.post(API_URL, headers=headers, json=payload, timeout=VLM_TIMEOUT)
-            response.raise_for_status()
-            result = response.json()
-            content = result["choices"][0]["message"]["content"].strip()
-            print(f"  📝 VLM返回: {content[:100]}")
-
-            # 第一层：直接解析（response_format 生效后应为纯 JSON）
-            try:
-                vlm_result = json.loads(content)
-                print(f"  ✅ JSON直接解析成功")
-                return vlm_result
-            except json.JSONDecodeError:
-                pass  # 继续走正则提取
-
-            # 第二层：正则提取 JSON 块（VLM 在 JSON 前后加了废话）
-            json_match = re.search(r'\{.*?\}', content, re.DOTALL)
-            if json_match:
-                try:
-                    vlm_result = json.loads(json_match.group())
-                    print(f"  ✅ 正则提取JSON成功")
-                    return vlm_result
-                except json.JSONDecodeError:
-                    pass  # JSON 格式仍有问题，继续走兜底逻辑
-
-            # 第三层：关键词匹配（补充中文"是/否"）
-            print(f"  ⚠️ VLM返回格式异常，尝试关键词解析...")
-            content_lower = content.lower()
-            if ("true" in content_lower or "是" in content_lower) and "detail" in content_lower:
-                return {"entered_detail": True, "current_page": "可能已进入详情页", "confidence": 0.5}
-            elif "false" in content_lower or "否" in content_lower:
-                return {"entered_detail": False, "current_page": "可能未进入详情页", "confidence": 0.5}
-
-        except requests.exceptions.Timeout:
-            wait = 10 * (2 ** (attempt - 1))
-            print(f"  ⏳ VLM超时，等待{wait}s后重试...")
-            if attempt < VLM_RETRIES:
-                time.sleep(wait)
-        except Exception as e:
-            print(f"  ❌ VLM调用失败: {e}")
-            if attempt < VLM_RETRIES:
-                time.sleep(5)
+        print(f"  VLM detail check (attempt {attempt})...")
+        vlm_result = call_vlm_json(prompt, screenshot_path, timeout=VLM_TIMEOUT, max_retries=1)
+        if vlm_result:
+            print(f"  parsed: {str(vlm_result)[:100]}")
+            return vlm_result
+        if attempt < VLM_RETRIES:
+            time.sleep(5)
 
     return {"entered_detail": None, "current_page": "VLM调用失败", "confidence": 0.0}
 
@@ -253,27 +185,33 @@ def should_stop_on_failure(step_results):
     return False
 
 
-def generate_archive_report(step_results, verification_results=None, vlm_result=None, failure_scene=None):
+def generate_archive_report(step_results, verification_results=None, vlm_result=None, failure_scene=None, case_meta=None, total_elapsed=None):
     """生成归档报告，按日期组织"""
     today = datetime.now().strftime("%Y-%m-%d")
     archive_date_dir = ARCHIVE_DIR / today
     archive_date_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    total_steps = len(step_results)
+    passed_steps = sum(1 for r in step_results if r.get("success"))
 
     report = {
         "timestamp": datetime.now().isoformat(),
-        "test_case": "TC001",
+        "test_case": (case_meta or {}).get("id", "manual"),
+        "test_case_name": (case_meta or {}).get("name", ""),
+        "search_term": (case_meta or {}).get("search_term", ""),
+        "total_elapsed_sec": round(total_elapsed, 2) if total_elapsed is not None else None,
         "steps": [],
         "overall": {
-            "success": all(r["success"] for r in step_results) if step_results else False,
-            "passed": sum(1 for r in step_results if r["success"]),
-            "failed": sum(1 for r in step_results if not r["success"])
+            "success": all(r.get("success") for r in step_results) if step_results else False,
+            "passed": passed_steps,
+            "failed": total_steps - passed_steps,
+            "total": total_steps,
         },
         "screenshots": [],
         "verification": verification_results or [],
         "vlm_detail_check": vlm_result,
-        "failure_scene": failure_scene
+        "failure_scene": failure_scene,
     }
 
     for idx, result in enumerate(step_results):
@@ -282,7 +220,9 @@ def generate_archive_report(step_results, verification_results=None, vlm_result=
             "name": result.get("name", f"Step{idx+1}"),
             "success": result.get("success", False),
             "message": result.get("message", ""),
-            "screenshots": result.get("screenshots", [])
+            "elapsed_sec": result.get("elapsed_sec"),
+            "screenshots": result.get("screenshots", []),
+            "state_check": result.get("state_check"),
         }
         report["steps"].append(step_entry)
         report["screenshots"].extend(step_entry["screenshots"])
@@ -291,48 +231,73 @@ def generate_archive_report(step_results, verification_results=None, vlm_result=
     with open(archive_json_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2, default=str)
 
+    overall_ok = report["overall"]["success"]
     md_content = f"""# 飞书CUA执行报告
 > 执行时间: {report['timestamp']}
-> 执行结果: {"✅ 全部成功" if report['overall']['success'] else "❌ 部分失败"}
-> 成功步骤: {report['overall']['passed']}/{report['overall']['passed'] + report['overall']['failed']}
+> 用例: {report['test_case']} {report['test_case_name']}
+> 执行结果: {"SUCCESS" if overall_ok else "FAILED"}
+> 成功步骤: {report['overall']['passed']}/{report['overall']['total']}
+> 总耗时: {report['total_elapsed_sec']}s
 
 ## 步骤详情
 """
 
     for step in report["steps"]:
-        status = "✅" if step["success"] else "❌"
-        md_content += f"### {status} Step {step['step']}: {step['name']}\n"
-        md_content += f"- 消息: {step['message']}\n"
-        if step["screenshots"]:
-            md_content += f"- 截图数: {len(step['screenshots'])}\n"
-        md_content += "\n"
+        status = "OK" if step["success"] else "FAIL"
+        elapsed = step.get("elapsed_sec")
+        elapsed_str = f"{elapsed}s" if elapsed is not None else "-"
+        md_content += f"### {'✅' if step['success'] else '❌'} Step {step['step']}: {step['name']}\n"
+        md_content += f"- 耗时: {elapsed_str}\n"
+        md_content += f"- 消息: {step['message']}\n\n"
 
     if verification_results:
         md_content += "## 截图对比验证\n"
         for v in verification_results:
-            status = "✅" if v["change_detected"] else "⚠️"
-            md_content += f"- {status} {v['step']}: 相似度={v['similarity']:.3f}\n"
+            status = "OK" if v.get("change_detected") else "WARN"
+            md_content += f"- {status} {v['step']}: similarity={v.get('similarity')}\n"
         md_content += "\n"
-
-    if vlm_result:
-        md_content += "## VLM详情页确认\n"
-        md_content += f"- 进入详情页: {vlm_result.get('entered_detail', '未知')}\n"
-        md_content += f"- 当前页面: {vlm_result.get('current_page', '未知')}\n"
-        md_content += f"- 置信度: {vlm_result.get('confidence', 0.0):.2f}\n\n"
-
-    if failure_scene:
-        md_content += f"## 失败现场\n"
-        md_content += f"- 现场目录: {failure_scene}\n\n"
 
     archive_md_path = archive_date_dir / f"run_{timestamp}.md"
     with open(archive_md_path, "w", encoding="utf-8") as f:
         f.write(md_content)
 
-    print(f"📦 归档完成: {archive_date_dir}")
-    print(f"  📄 JSON: {archive_json_path}")
-    print(f"  📝 MD: {archive_md_path}")
+    execution_report_path = write_execution_report(report, timestamp)
 
-    return str(archive_json_path)
+    print(f"archive: {archive_date_dir}")
+    print(f"  json: {archive_json_path}")
+    print(f"  md: {archive_md_path}")
+    print(f"  execution: {execution_report_path}")
+
+    return str(archive_json_path), str(execution_report_path)
+
+
+def write_execution_report(report, timestamp):
+    """Write reports/execution_report_*.md/json (5-step metrics)."""
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    json_path = REPORT_DIR / f"execution_report_{timestamp}.json"
+    md_path = REPORT_DIR / f"execution_report_{timestamp}.md"
+
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2, default=str)
+
+    overall = report["overall"]
+    ok = overall["success"]
+    md = f"""# 飞书自动化执行报告
+> 执行时间: {report['timestamp']}
+> 用例: {report.get('test_case', '')} {report.get('test_case_name', '')}
+> 执行结果: {"SUCCESS" if ok else "FAILED"}
+> 成功步骤: {overall['passed']}/{overall['total']}
+> 总耗时: {report.get('total_elapsed_sec', '-')}s
+
+## 步骤详情
+"""
+    for step in report["steps"]:
+        md += f"### {'✅' if step['success'] else '❌'} Step {step['step']}: {step['name']}\n"
+        md += f"- 耗时: {step.get('elapsed_sec', '-')}s\n"
+        md += f"- 消息: {step['message']}\n\n"
+
+    md_path.write_text(md, encoding="utf-8")
+    return str(md_path)
 
 
 def check_suspicious_failure(step_results, verification_results):
@@ -362,7 +327,7 @@ def check_suspicious_failure(step_results, verification_results):
     return suspicious_flags
 
 
-def verify_and_archive(step_results=None, stop_on_failure=True):
+def verify_and_archive(step_results=None, stop_on_failure=True, case_meta=None, total_elapsed=None):
     """验证执行结果并归档
 
     Args:
@@ -415,34 +380,34 @@ def verify_and_archive(step_results=None, stop_on_failure=True):
                         print("  ⚠️ VLM确认失败或结果不确定")
 
     print("\n📦 步骤3: 生成归档报告")
-    archive_path = generate_archive_report(step_results, verification_results, vlm_result, failure_scene)
+    archive_path, execution_report = generate_archive_report(
+        step_results, verification_results, vlm_result, failure_scene, case_meta, total_elapsed
+    )
 
-    print("\n🔎 步骤4: 可疑失败检测")
+    steps_ok = all(r.get("success") for r in step_results[:4]) if len(step_results) >= 4 else all(r.get("success") for r in step_results)
+    vlm_ok = True
+    if vlm_result and vlm_result.get("entered_detail") is False:
+        vlm_ok = False
+
+    print("\nStep 4: suspicious failure check")
     suspicious = check_suspicious_failure(step_results, verification_results)
     if suspicious:
-        print("  ⚠️ 检测到可疑失败:")
         for s in suspicious:
-            print(f"    - {s['step']} ({s['description']}): {s['reason']}")
-    else:
-        print("  ✅ 未检测到可疑失败")
+            print(f"  WARN {s['step']}: {s['reason']}")
 
-    print("\n" + "=" * 60)
-    print("=== 执行汇总 ===")
-    print("=" * 60)
-    for r in step_results:
-        status = "✅" if r["success"] else "❌"
-        print(f"{status} {r.get('name', '未知')}: {r.get('message', '')}")
-
-    print("\n✅ Step 05 完成，所有数据已归档")
-    print(f"📦 归档位置: {archive_path}")
+    step05_success = steps_ok and vlm_ok and not suspicious
+    print(f"archive: {archive_path}")
+    print(f"report: {execution_report}")
 
     return {
-        "success": all(r["success"] for r in step_results) if step_results else True,
+        "success": step05_success,
+        "message": f"verify archive ({'pass' if step05_success else 'check warnings'})",
         "verification_results": verification_results,
         "vlm_result": vlm_result,
         "archive_path": archive_path,
+        "execution_report": execution_report,
         "suspicious_failures": suspicious,
-        "failure_scene": failure_scene
+        "failure_scene": failure_scene,
     }
 
 

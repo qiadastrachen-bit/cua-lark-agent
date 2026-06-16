@@ -1,78 +1,110 @@
-# Larker — 飞书桌面自动化 Agent（CUA 挑战赛）
+# Larker — 飞书桌面自动化 Agent
 
-> 基于视觉理解的飞书 Windows 客户端搜索自动化框架。  
-> 起源：2026 飞书 CUA 挑战赛 M1/M2 阶段。
-
----
-
-## 项目定位
-
-Larker 在**无 DOM / 无 Accessibility API** 的前提下，通过 **OpenCV + VLM + pyautogui** 完成飞书搜索闭环：
-
-```
-点击搜索框 → 输入关键词 → 等待结果 → 点击第一条 → 验证归档
-```
-
-当前是**可运行的工程 Demo**，不是已量产的无人值守 Agent。能力边界与实测数据见下文。
+> 2026 飞书 CUA 挑战赛 M1/M2 工程实现。  
+> 在**无 DOM、无 Accessibility API** 的飞书 Windows 客户端上，用**截图 + 视觉理解 + 键鼠模拟**完成搜索与消息发送。
 
 ---
 
-## 实测数据（可引用）
+## 这是什么
 
-| 指标 | 数值 | 来源 |
+Larker 是一条**固定步骤的桌面自动化流水线**（不是自主规划 Agent）：
+
+```
+点击搜索框 → 输入关键词 → 等待结果 → 点击第一条 →（可选）发送消息 → 验证归档
+```
+
+**典型场景：** 搜索联系人「陈锦彤」→ 打开会话 → 发送 `hello`。
+
+**交互方式：** 命令行 + `.env` 配置；每次运行生成 `reports/`、`archive/` 执行报告。
+
+---
+
+## 为什么需要它
+
+| 痛点 | Larker 的做法 |
+|------|----------------|
+| 飞书桌面端无法走 Selenium / 控件树 | 全屏截图 + 视觉定位 |
+| 固定坐标随分辨率失效 | OpenCV 模板 + VLM 语义定位混合 |
+| 失败难复盘 | 分步截图、JSON/MD 报告、基准统计 |
+
+---
+
+## 怎么工作的
+
+系统把「看屏幕」和「理解指令」拆开，各用合适的 API：
+
+| 组件 | 作用 | 用在哪 |
+|------|------|--------|
+| **OpenCV** | 像素模板匹配，快且准 | Step01 搜索框（主）；Step04 兜底 |
+| **百炼 VLM**（qwen3-vl） | 看截图，返回坐标 / 状态 / 验证 | Step04 点结果、Step06 发消息、状态门禁 |
+| **DeepSeek** | 纯文本，**不看截图** | `--instruction` 自然语言解析（可选） |
+| **pyautogui** | 截图、点击、键盘 | 所有执行动作 |
+
+推荐配置 **`VLM_PROVIDER=hybrid`**：DeepSeek 负责文本，百炼负责视觉。  
+DeepSeek 官方 API 不支持 `image_url`，不能单独承担识图任务。
+
+更细的调用链与排错路径见 [系统架构设计](docs/SYSTEM_DESIGN.md)。
+
+---
+
+## 实测数据
+
+| 指标 | 数值 | 说明 |
 |------|------|------|
-| M1 单步稳定性 | **62.5%**（5/8 次） | `reports/M1_test_record.md` |
-| M2 流水线 Step01–04 全通过 | **77.4%**（24/31 次） | `reports/vlm_benchmark_20260616_225752.md` |
-| 正式测试用例 | 3 条 | `test_cases.json` |
-| Demo 演示模式（固定坐标） | 3/3 通过 | 2026-05-06，`USE_FIXED_COORDS=true` |
+| M1 单步稳定性 | **62.5%**（5/8） | `reports/M1_test_record.md` |
+| M2 流水线 Step01–04 全通过 | **77.4%**（24/31） | 历史 `reports/` 统计 |
+| 测试用例 | 4 条 | `test_cases.json`（含发消息 TC004） |
+| Demo 固定坐标模式 | 3/3 | `USE_FIXED_COORDS=true`，**不计入 VLM 基准** |
 
-**重要区分：**
+两种运行模式：
 
-- **VLM 模式**（`USE_FIXED_COORDS=false`）：Step04 调用火山方舟 VLM 定位，OpenCV 兜底。
-- **Demo 模式**（`USE_FIXED_COORDS=true`）：Step04 使用固定坐标 `(1280, 350)`，仅适用于特定分辨率/窗口布局，**不计入 VLM 基准成功率**。
+- **VLM 模式**（`USE_FIXED_COORDS=false`）：Step04 百炼定位 + OpenCV 兜底，用于真实能力评估。
+- **Demo 模式**（`USE_FIXED_COORDS=true`）：Step04 固定坐标 `(1280, 350)`，仅适合特定分辨率演示。
 
 重新生成基准报告：
 
 ```bash
-python tools/run_vlm_benchmark.py --historical   # 仅统计历史 reports/
-python tools/run_vlm_benchmark.py                # Live 跑全部用例（需 .env + 飞书已打开）
+python tools/run_vlm_benchmark.py --historical
+python tools/run_vlm_benchmark.py   # Live 跑用例，需 .env + 飞书已打开
 ```
-
----
-
-## 技术栈
-
-| 层级 | 技术 |
-|------|------|
-| 视觉定位 | OpenCV 模板匹配（Step01）、火山方舟 VLM（Step04/05） |
-| 桌面操作 | pyautogui、pyperclip |
-| 编排 | Python 5 步流水线 + `retry_step` 重试 |
-| 测试 | pytest + subprocess |
-| 录屏 | mss + cv2（`run_e2e_with_recording.py`） |
 
 ---
 
 ## 快速开始
 
+**环境：** Windows，已登录飞书客户端，Python 3.10+。
+
 ```bash
-git clone <repo-url>
-cd feishu-cua-challenge
 pip install -r requirements.txt
+# 若 pip 报 HASH 错误，改用：
+# pip install -r requirements-min.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --no-cache-dir
 
 cp .env.example .env
-# 编辑 .env：填入 VOLC_API_KEY、VOLC_ENDPOINT_ID
+# 填入 DEEPSEEK_API_KEY + VISION_*（百炼视觉 Key）
 
-# 单条用例（VLM 模式）
+python tools/test_vlm_connection.py
 python run_all.py --search-term "陈锦彤"
-
-# 全部用例
-python run_all.py --run-all
-
-# E2E + 录屏
-python run_e2e_with_recording.py --run-all
+python run_all.py --search-term "陈锦彤" --message "hello"
+python run_all.py --instruction "搜索陈锦彤并给她发送hello"
 ```
 
-**前置条件：** 飞书 Windows 客户端已打开并处于主界面；运行期间勿操作键鼠。
+`.env` 关键项（详见 `.env.example`）：
+
+```env
+VLM_PROVIDER=hybrid
+DEEPSEEK_API_KEY=sk-...
+VISION_API_KEY=sk-...
+VISION_MODEL=qwen3.6-flash
+VISION_API_URL=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+```
+
+| 变量 | 说明 | 默认 |
+|------|------|------|
+| `USE_FIXED_COORDS` | 固定坐标 Demo 模式 | `false` |
+| `ENABLE_STATE_CHECK` | 步骤后 VLM 状态检测 | `true` |
+| `STEP_DELAY_SEC` | Step 间等待（防 API 限流） | `30` |
+
+**运行注意：** Agent 会控制键鼠；跑前飞书回主界面（`Esc`），窗口最大化，运行中勿触碰鼠标。
 
 ---
 
@@ -80,36 +112,41 @@ python run_e2e_with_recording.py --run-all
 
 ```
 feishu-cua-challenge/
-├── run_all.py                 # 主入口：5 步流水线
-├── run_e2e_with_recording.py  # E2E + MP4 录屏
-├── config.py                  # API、路径、USE_FIXED_COORDS
-├── test_cases.json            # 3 条测试用例
-├── ops/                       # Step 01–05 实现
-├── core/state_checker.py      # VLM 状态分析（已实现，尚未接入主流程）
-├── tests/test_e2e.py
-├── tools/run_vlm_benchmark.py # 基准测试与报告生成
-├── reports/                   # 执行报告 + 基准报告
+├── run_all.py              # 主入口
+├── config.py               # hybrid 双 API 配置
+├── test_cases.json         # 4 条用例
+├── ops/                    # Step 01–06
+├── core/
+│   ├── state_checker.py    # 步骤间状态门禁
+│   └── task_parser.py      # 自然语言指令解析
+├── utils/
+│   ├── vlm_client.py       # DeepSeek / 百炼 统一路由
+│   └── coords.py           # VLM 坐标换算
+├── tools/
+│   ├── test_vlm_connection.py
+│   └── run_vlm_benchmark.py
+├── reports/                # 执行报告与基准
 └── docs/
-    ├── REQUIREMENTS.md        # 需求分析
-    └── SYSTEM_DESIGN.md       # 系统架构设计
+    ├── REQUIREMENTS.md
+    └── SYSTEM_DESIGN.md
 ```
 
 ---
 
 ## 已知限制
 
-1. **Step01 依赖 OpenCV 模板**：UI 变化或缩放会导致匹配失败。
-2. **分辨率/DPI**：物理像素与逻辑坐标不一致时，VLM 坐标可能偏移（见 M1 测试记录）。
-3. **VLM 限流（429）**：连续运行需 Step 间 30s、用例间 90s 等待。
-4. **Overlay 悬浮窗**：已搁置，Chrome `--app` 方案不稳定。
-5. **自然语言入口**：尚未实现；当前通过 CLI 参数或 JSON 配置搜索词。
+1. **Step01 依赖 OpenCV 模板**，飞书 UI 变更需更新 `assets/template_search_box.png`。
+2. **Step04 VLM 坐标有随机偏差**，同一界面多次运行可能点偏；已做坐标换算与点击验证，仍非像素级稳定。
+3. **VLM API 限流（429）**，连续运行依赖 Step 间 30s、用例间 90s 等待。
+4. **固定流水线**，仅覆盖搜索 + 打开第一条 + 可选发消息，不支持审批、日历等场景。
+5. **Overlay 悬浮窗**已搁置，未接入主流程。
 
 ---
 
 ## 文档
 
 - [需求分析](docs/REQUIREMENTS.md)
-- [系统架构设计](docs/SYSTEM_DESIGN.md)
+- [系统架构与排错](docs/SYSTEM_DESIGN.md)
 - [VLM 基准报告](reports/VLM_BENCHMARK.md)
 - [M1 测试记录](reports/M1_test_record.md)
 
